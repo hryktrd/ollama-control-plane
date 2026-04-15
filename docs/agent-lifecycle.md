@@ -499,7 +499,7 @@ async def submit_job_result(job_id: str, status: str, result: Any):
 ```python
 def should_refresh_token():
     token_payload = jwt.decode(listener_token, options={"verify_signature": False})
-    expires_at = datetime.fromtimestamp(token_payload["exp"])
+    expires_at = datetime.utcfromtimestamp(token_payload["exp"])
     now = datetime.utcnow()
     
     time_to_expiry = (expires_at - now).total_seconds()

@@ -297,7 +297,7 @@ curl https://control-plane.local/v1/chat/completions \
 ```json
 {
   "id": "chatcmpl-550e8400",
-  "object": "text_completion",
+  "object": "chat.completion",
   "created": 1713083400,
   "model": "qwen-coder",
   "usage": {
@@ -320,13 +320,13 @@ curl https://control-plane.local/v1/chat/completions \
 
 **Response (200 OK - Streaming)**:
 ```
-data: {"id":"chatcmpl-550e8400","object":"text_completion.chunk","created":1713083400,"model":"qwen-coder","choices":[{"index":0,"delta":{"role":"assistant","content":"def"},"finish_reason":null}]}
+data: {"id":"chatcmpl-550e8400","object":"chat.completion.chunk","created":1713083400,"model":"qwen-coder","choices":[{"index":0,"delta":{"role":"assistant","content":"def"},"finish_reason":null}]}
 
-data: {"id":"chatcmpl-550e8400","object":"text_completion.chunk","created":1713083400,"model":"qwen-coder","choices":[{"index":0,"delta":{"content":" hello_world"},"finish_reason":null}]}
+data: {"id":"chatcmpl-550e8400","object":"chat.completion.chunk","created":1713083400,"model":"qwen-coder","choices":[{"index":0,"delta":{"content":" hello_world"},"finish_reason":null}]}
 
 ...
 
-data: {"id":"chatcmpl-550e8400","object":"text_completion.chunk","created":1713083400,"model":"qwen-coder","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+data: {"id":"chatcmpl-550e8400","object":"chat.completion.chunk","created":1713083400,"model":"qwen-coder","choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
 
 data: [DONE]
 ```

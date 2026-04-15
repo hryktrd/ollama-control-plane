@@ -1,197 +1,211 @@
 # CLAUDE.md
 
-## Project
+## プロジェクト概要
 
-`ollama-control-plane` is a control plane for using locally running Ollama model hosts across multiple PCs.
+`ollama-control-plane` は、複数のPCでローカル動作する Ollama モデルホストを束ねるコントロールプレーンです。
 
-The system should support:
-- remote use of local Ollama-backed models
-- polling-based agent execution from user PCs
-- model-agnostic routing across Qwen, Gemma, and future Ollama-compatible models
-- OpenAI-compatible API access
-- Claude Code-friendly integration paths
-- secure agent registration, authentication, and auditability
+システムが対応すべき機能：
 
-This repository is not model-specific.
-Do not design the system around Qwen only unless a task explicitly requires model-specific behavior.
+- ローカル Ollama バックエンドモデルのリモート利用
+- ユーザーPCからのポーリング型エージェント実行
+- Qwen、Gemma、およびその他の Ollama 互換モデルを横断するモデル非依存ルーティング
+- OpenAI 互換 API アクセス
+- Claude Code フレンドリーな統合パス
+- エージェントの安全な登録・認証・監査
+
+このリポジトリは特定モデル専用ではありません。
+明示的にモデル固有の動作が要求された場合を除き、Qwen を前提とした設計をしてはいけません。
 
 ---
 
-## Read first
+## 作業前に必ず読むこと
 
-Before making non-trivial changes, read these in order:
+非自明な変更を行う前に、以下の順で読むこと：
 
 1. `README.md`
 2. `docs/INDEX.md`
 3. `docs/product-requirements.md`
 4. `docs/architecture.md`
 
-If the task involves authentication, registration, trust boundaries, or audit behavior, also read:
+認証・登録・信頼境界・監査動作に関わるタスクの場合は、さらに以下も読むこと：
 
 - `docs/security.md`
 - `docs/agent-lifecycle.md`
 
-If the task involves API behavior or SDK compatibility, also read:
+API 動作や SDK 互換性に関わるタスクの場合は、さらに以下も読むこと：
 
 - `docs/api-spec.md`
 
-If the task is implementation work, also read:
+実装作業の場合は、さらに以下も読むこと：
 
 - `docs/mvp-scope.md`
 - `docs/implementation-guide.md`
 
 ---
 
-## Current repository structure
+## 現在のリポジトリ構造
 
-Top-level:
-- `CLAUDE.md` — persistent project instructions for Claude Code
-- `README.md` — human-readable project overview and setup
-- `docs/` — working project documentation
+トップレベル：
 
-Current docs:
-- `docs/INDEX.md` — document index and reading order
-- `docs/product-requirements.md` — product and system requirements
-- `docs/architecture.md` — architecture and component design
-- `docs/api-spec.md` — API contracts and compatibility behavior
-- `docs/security.md` — auth, token, trust boundary, and security requirements
-- `docs/agent-lifecycle.md` — agent states, polling loop, and lifecycle flows
-- `docs/mvp-scope.md` — scoped implementation plan for MVP and phases
-- `docs/implementation-guide.md` — Claude Code execution playbook and prompt templates
+- `CLAUDE.md` — Claude Code 向け永続的プロジェクト指示
+- `README.md` — プロジェクト概要とセットアップ手順
+- `docs/` — プロジェクトのドキュメント一式
 
----
+現在のドキュメント：
 
-## Core architecture assumptions
-
-Unless a task explicitly changes them, assume:
-
-- Agent Hosts run on user-controlled PCs and connect to local Ollama.
-- Agent Hosts poll the Controller rather than receiving inbound commands directly.
-- The Controller is the central trust and coordination boundary.
-- Ollama should not be directly exposed to the public internet.
-- Registration credentials and normal polling credentials must be separated.
-- Short-lived operational credentials are preferred over long-lived static secrets.
-- The architecture must stay compatible with multiple model families.
+- `docs/INDEX.md` — ドキュメントインデックスと読む順序
+- `docs/product-requirements.md` — プロダクト・システム要件
+- `docs/architecture.md` — アーキテクチャとコンポーネント設計
+- `docs/api-spec.md` — API 契約と互換性動作
+- `docs/security.md` — 認証・トークン・信頼境界・セキュリティ要件
+- `docs/agent-lifecycle.md` — エージェントの状態・ポーリングループ・ライフサイクルフロー
+- `docs/mvp-scope.md` — MVP およびフェーズ別の実装計画
+- `docs/implementation-guide.md` — Claude Code 向け実行プレイブックとプロンプトテンプレート
 
 ---
 
-## Working rules
+## コアアーキテクチャの前提
 
-### Docs-first
-Update docs before or alongside code when behavior, requirements, or architecture changes.
+明示的に変更するタスクがない限り、以下を前提とすること：
 
-### Specs before implementation
-Do not implement major behavior until the relevant details are reflected in the docs.
-If the behavior is not described clearly enough in the current docs, update the relevant document first.
-
-### No hidden assumptions
-If requirements are ambiguous, do not silently invent behavior.
-State the ambiguity, propose concrete options, and ask for a decision when needed.
-
-### Small, reviewable changes
-Prefer small, bounded tasks over large all-at-once implementations.
-
-### Preserve model-agnostic design
-Keep the system generic across Qwen, Gemma, and future Ollama-served models.
-
-### Keep documentation aligned
-Do not let code drift away from `product-requirements.md`, `architecture.md`, `api-spec.md`, `security.md`, or `agent-lifecycle.md`.
+- Agent Host はユーザー管理下の PC で動作し、ローカルの Ollama に接続する。
+- Agent Host は、インバウンドのコマンドを直接受け取るのではなく、Controller をポーリングする。
+- Controller は中央の信頼境界かつ調整ハブである。
+- Ollama はパブリックインターネットに直接公開しない。
+- 登録用クレデンシャルと通常のポーリング用クレデンシャルは分離する。
+- 長寿命の静的シークレットより、短命の運用用クレデンシャルを優先する。
+- アーキテクチャは複数のモデルファミリーに対応できる状態を維持する。
 
 ---
 
-## Implementation workflow
+## 作業ルール
 
-For non-trivial work, follow this order:
+### ドキュメントファースト
 
-1. Read `docs/INDEX.md`
-2. Read the most relevant source docs
-3. Check whether the current docs are sufficient
-4. Update docs first if needed
-5. Implement the smallest useful slice
-6. Add or update tests
-7. Update docs again if behavior changed
-8. Summarize changed files, decisions, and unresolved risks
+動作・要件・アーキテクチャが変わる場合は、コードより先に、または同時にドキュメントを更新すること。
 
-For phase-based work, use:
+### 仕様から実装へ
+
+関連する詳細がドキュメントに反映されるまで、主要な動作を実装しないこと。
+現在のドキュメントに十分な記述がない場合は、先に該当ドキュメントを更新すること。
+
+### 隠れた前提を持ち込まない
+
+要件が曖昧な場合は、黙って動作を作り上げないこと。
+曖昧な点を明示し、具体的な選択肢を提示し、必要な場合は決定を待つこと。
+
+### 小さく、レビューしやすい変更
+
+大規模な一括実装より、小さく境界の明確なタスクを優先すること。
+
+### モデル非依存設計を維持する
+
+Qwen・Gemma・将来の Ollama 対応モデルに対して汎用であること。
+
+### ドキュメントとコードの整合性を保つ
+
+コードが `product-requirements.md`・`architecture.md`・`api-spec.md`・`security.md`・`agent-lifecycle.md` から乖離しないようにすること。
+
+---
+
+## 実装ワークフロー
+
+非自明な作業は以下の順で行うこと：
+
+1. `docs/INDEX.md` を読む
+2. 最も関連する元ドキュメントを読む
+3. 現在のドキュメントが十分かどうか確認する
+4. 必要であれば先にドキュメントを更新する
+5. 最小の有用な単位で実装する
+6. テストを追加または更新する
+7. 動作が変わった場合、ドキュメントを再更新する
+8. 変更ファイル・決定事項・未解決リスクをまとめる
+
+フェーズ単位の作業は以下を使うこと：
+
 - `docs/mvp-scope.md`
 - `docs/implementation-guide.md`
 
 ---
 
-## Source of truth by topic
+## トピック別の信頼できる情報源
 
-Use these files as the current source of truth:
+以下のファイルを現時点の正式な情報源として使うこと：
 
-- Product and scope: `docs/product-requirements.md`
-- Architecture and component boundaries: `docs/architecture.md`
-- API behavior and payloads: `docs/api-spec.md`
-- Auth and security rules: `docs/security.md`
-- Agent states and polling flow: `docs/agent-lifecycle.md`
-- Phase boundaries and delivery scope: `docs/mvp-scope.md`
-- Execution prompts and phased implementation guidance: `docs/implementation-guide.md`
+- プロダクトとスコープ：`docs/product-requirements.md`
+- アーキテクチャとコンポーネント境界：`docs/architecture.md`
+- API 動作とペイロード：`docs/api-spec.md`
+- 認証とセキュリティルール：`docs/security.md`
+- エージェントの状態とポーリングフロー：`docs/agent-lifecycle.md`
+- フェーズ境界と納品スコープ：`docs/mvp-scope.md`
+- 実行プロンプトとフェーズ実装ガイダンス：`docs/implementation-guide.md`
 
-If these files conflict, prefer resolving the conflict explicitly instead of guessing.
-
----
-
-## Coding expectations
-
-- Keep Controller, Gateway, and Agent Host responsibilities separated.
-- Prefer explicit types and clear interfaces.
-- Design for retries, offline agents, cancellation, and partial failure.
-- Keep state transitions explicit and auditable.
-- Avoid tight coupling between external API payloads and internal persistence models.
-- Do not hardcode model-specific logic unless required.
-- Do not log secrets, raw tokens, or sensitive values.
+ファイル間で矛盾がある場合は、推測で解決せず明示的に解消すること。
 
 ---
 
-## Security expectations
+## コーディング規約
 
-- Treat the Controller as an internet-facing boundary.
-- Keep Ollama local to the Agent Host.
-- Use bootstrap registration credentials only for enrollment.
-- Use short-lived listener or session tokens for normal agent operation.
-- Support revocation and rotation where possible.
-- Keep auditability for registration, auth events, job dispatch, and admin actions.
-- Any security tradeoff made for convenience must be documented in `docs/security.md`.
-
----
-
-## Testing expectations
-
-When implementing behavior:
-- add tests with the implementation
-- prefer meaningful unit tests plus integration coverage for critical flows
-- preserve previously validated behavior
-- verify auth failures, polling behavior, job execution flow, and retry-sensitive paths
-
-Critical flows that should remain testable:
-- agent registration
-- token issuance and refresh
-- polling
-- job dispatch
-- job result submission
-- OpenAI-compatible request/response flow
-- model routing behavior if introduced
+- Controller・Gateway・Agent Host の責務を分離すること。
+- 明示的な型と明確なインターフェースを優先すること。
+- リトライ・オフラインエージェント・キャンセル・部分的な失敗を考慮して設計すること。
+- 状態遷移を明示的かつ監査可能な形で保つこと。
+- 外部 API ペイロードと内部永続化モデルを密結合させないこと。
+- 必須でない限り、モデル固有のロジックをハードコードしないこと。
+- シークレット・生トークン・機密値をログに出力しないこと。
 
 ---
 
-## Definition of done
+## セキュリティ規約
 
-A task is not complete unless:
-- code is implemented
-- relevant tests are added or updated
-- affected docs are updated
-- behavior remains aligned with the current docs
-- the final summary lists changed files and any remaining risks or follow-up work
+- Controller をインターネット公開境界として扱うこと。
+- Ollama は Agent Host のローカルに留めること。
+- ブートストラップ登録用クレデンシャルは登録時のみ使用すること。
+- 通常のエージェント動作では短命のリスナートークンまたはセッショントークンを使用すること。
+- 可能な限りリボケーションとローテーションをサポートすること。
+- 登録・認証イベント・ジョブ配布・管理者操作の監査可能性を維持すること。
+- 利便性のために行ったセキュリティトレードオフは `docs/security.md` に記録すること。
 
 ---
 
-## When unsure
+## テスト規約
 
-If you are unsure:
-- identify the ambiguity clearly
-- propose 1 to 3 concrete options
-- recommend one option with reasoning
-- wait for confirmation if the choice affects architecture, security, compatibility, or migration
+動作を実装する際は：
+
+- 実装とともにテストを追加すること
+- 意味のあるユニットテストと、クリティカルフローのインテグレーションカバレッジを優先すること
+- 以前に検証済みの動作を維持すること
+- 認証失敗・ポーリング動作・ジョブ実行フロー・リトライが重要なパスを検証すること
+
+テスト可能な状態を維持すべきクリティカルフロー：
+
+- エージェント登録
+- トークン発行とリフレッシュ
+- ポーリング
+- ジョブ配布
+- ジョブ結果送信
+- OpenAI 互換のリクエスト/レスポンスフロー
+- 導入された場合のモデルルーティング動作
+
+---
+
+## 完了の定義
+
+タスクは以下の条件を満たさない限り完了ではありません：
+
+- コードが実装されている
+- 関連するテストが追加または更新されている
+- 影響を受けるドキュメントが更新されている
+- 動作が現在のドキュメントと整合している
+- 最終サマリーに変更ファイル・残存リスク・フォローアップ作業が列挙されている
+
+---
+
+## 判断に迷う場合
+
+判断に迷う場合は：
+
+- 曖昧な点を明確に示す
+- 具体的な選択肢を 1～3 個提示する
+- 理由を添えて推奨案を示す
+- アーキテクチャ・セキュリティ・互換性・移行に影響する選択の場合は、確認を待つ

@@ -218,8 +218,7 @@ def generate_api_key(user_id: str, name: str, scopes: list):
 **検証**:
 ```python
 def validate_api_key(key: str):
-    prefix, _, rest = key.partition("-")
-    if prefix != "sk" and prefix != "sk-proj":
+    if not (key.startswith("sk-") or key.startswith("sk-proj-")):
         raise InvalidKeyError()
     
     key_hash = hashlib.sha256(key.encode()).hexdigest()
@@ -513,7 +512,7 @@ Max queue size: 10,000 jobs
 
 1. **Immediate**:
    - 当該トークンを無効化
-   - token_reviled フラグをDBに記録
+   - token_revoked フラグをDBに記録
    - ユーザーに通知
 
 2. **Post incident**:

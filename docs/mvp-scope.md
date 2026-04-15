@@ -202,7 +202,7 @@ CREATE TABLE agents (
   pool_id TEXT,
   hostname TEXT UNIQUE NOT NULL,
   status TEXT DEFAULT 'registered',
-  capabilities JSONB,
+  capabilities TEXT,  -- JSON文字列（SQLite互換）
   last_seen_at TIMESTAMP,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -215,8 +215,8 @@ CREATE TABLE jobs (
   job_type TEXT NOT NULL,
   model TEXT NOT NULL,
   status TEXT DEFAULT 'pending',
-  payload JSONB,
-  result JSONB,
+  payload TEXT,  -- JSON文字列（SQLite互換）
+  result TEXT,   -- JSON文字列（SQLite互換）
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
   started_at TIMESTAMP,
   completed_at TIMESTAMP
@@ -252,7 +252,7 @@ CREATE TABLE audit_logs (
   actor_id TEXT,
   resource_type TEXT,
   resource_id TEXT,
-  details JSONB
+  details TEXT  -- JSON文字列（SQLite互換）
 );
 ```
 
@@ -494,7 +494,7 @@ Advanced Features:
 
 ## 実装費用推定 (Claude Code を活用)
 
-| Phase | 期間 | 主要作業 | Claude詐取 |
+| Phase | 期間 | 主要作業 | Claude活用率 |
 |-------|------|--------|----------|
 | **MVP (Phase 1)** | 4-6週間 | Agent + Controller + API | 70% |
 | **Phase 2** | 3-4週間 | スケーリング | 60% |
@@ -535,7 +535,7 @@ Advanced Features:
 
 - Phase 1: SQLite で十分
 - Phase 2-3: PostgreSQL への migration (simple)
-- Alembic / Alembic で schema evolution を management
+- Alembic でスキーマのバージョン管理を行う
 
 ---
 
@@ -544,7 +544,7 @@ Advanced Features:
 ### Agent Host MVP
 
 - [ ] Installation guide
-- [ ] Configuration (环境变数、config file)
+- [ ] Configuration (環境変数、設定ファイル)
 - [ ] Ollama connectivity test
 - [ ] Registration flow (invitation token → listener token)
 - [ ] Polling loop
@@ -575,7 +575,7 @@ Advanced Features:
 - [ ] OpenAI Python SDK compatibility test
 - [ ] OpenAI Node.js SDK compatibility test (bonus)
 - [ ] Custom CLI tool example (optional)
-- [ ] Example notebook (Claude Code可以试)
+- [ ] サンプルノートブック (Claude Codeで試行可能)
 
 ---
 

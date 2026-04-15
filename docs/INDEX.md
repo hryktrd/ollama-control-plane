@@ -1,16 +1,16 @@
-# Documentation Index
+# ドキュメントインデックス
 
-This directory contains the working documentation for `ollama-control-plane`.
+このディレクトリには `ollama-control-plane` のドキュメント一式が格納されています。
 
-The docs are currently kept in a flat `docs/` structure.
-That is intentional for the current stage of the project.
-If the project grows, the docs can later be split into subdirectories, but for now the single-level layout keeps navigation simple.
+現在はフラットな `docs/` 構造で管理しています。
+プロジェクト初期段階としては意図的な選択です。
+プロジェクトが成長すればサブディレクトリへの分割も検討しますが、現時点ではシングルレイヤーの方がナビゲーションが簡単です。
 
 ---
 
-## Reading order
+## 読む順序
 
-If you are new to the project, read documents in this order:
+プロジェクトが初めての場合は、以下の順で読んでください：
 
 1. `product-requirements.md`
 2. `architecture.md`
@@ -20,7 +20,8 @@ If you are new to the project, read documents in this order:
 6. `mvp-scope.md`
 7. `implementation-guide.md`
 
-If you only need a quick implementation start:
+実装をすぐに始めたい場合：
+
 1. `product-requirements.md`
 2. `architecture.md`
 3. `api-spec.md`
@@ -28,244 +29,274 @@ If you only need a quick implementation start:
 
 ---
 
-## Document guide
+## ドキュメントガイド
 
 ### `product-requirements.md`
-Defines what the system is, why it exists, and what it must do.
 
-Use this file for:
-- product goals
-- scope
-- use cases
-- functional requirements
-- non-functional requirements
-- success criteria
+システムが何であり、なぜ存在し、何をしなければならないかを定義します。
 
-This file should answer:
-- what problem the system solves
-- who uses it
-- what capabilities are required
-- what is out of scope
+用途：
+
+- プロダクトゴール
+- スコープ
+- ユースケース
+- 機能要件
+- 非機能要件
+- 成功基準
+
+このファイルが答えるべき問い：
+
+- システムが解決する問題は何か
+- 誰が使うか
+- どんな機能が必要か
+- スコープ外は何か
 
 ---
 
 ### `architecture.md`
-Defines how the system is structured.
 
-Use this file for:
-- major components
-- controller / agent-host / gateway boundaries
-- data flow
-- polling design
-- model routing concepts
-- deployment topology
-- storage and queueing direction
+システムがどのように構成されているかを定義します。
 
-This file should answer:
-- how the system works internally
-- which component owns which responsibility
-- which assumptions are architectural rather than temporary
+用途：
+
+- 主要コンポーネント
+- Controller / Agent Host / Gateway の境界
+- データフロー
+- ポーリング設計
+- モデルルーティングの概念
+- デプロイトポロジー
+- ストレージとキューイングの方向性
+
+このファイルが答えるべき問い：
+
+- システムが内部でどう動くか
+- どのコンポーネントがどの責務を持つか
+- どの前提がアーキテクチャ上の決定であり一時的なものでないか
 
 ---
 
 ### `security.md`
-Defines security assumptions and rules.
 
-Use this file for:
-- registration flow
-- invitation/bootstrap tokens
-- listener tokens
-- refresh tokens
-- API key handling
-- trust boundaries
-- audit expectations
-- secret handling
-- future hardening items such as mTLS and RBAC
+セキュリティの前提とルールを定義します。
 
-This file should answer:
-- who can register an agent
-- how agents authenticate
-- how clients authenticate
-- what is considered sensitive
-- what must be logged or never logged
+用途：
+
+- 登録フロー
+- 招待トークン / ブートストラップトークン
+- リスナートークン
+- リフレッシュトークン
+- API キー管理
+- 信頼境界
+- 監査要件
+- シークレット管理
+- 将来の強化項目（mTLS、RBAC など）
+
+このファイルが答えるべき問い：
+
+- エージェントを登録できるのは誰か
+- エージェントはどう認証するか
+- クライアントはどう認証するか
+- 何が機密情報か
+- 何をログに記録し、何を記録してはいけないか
 
 ---
 
 ### `agent-lifecycle.md`
-Defines the runtime lifecycle of an agent host.
 
-Use this file for:
-- agent states
-- registration lifecycle
-- polling loop
-- refresh behavior
-- job execution flow
-- retry behavior
-- failure and offline handling
+エージェントホストのランタイムライフサイクルを定義します。
 
-This file should answer:
-- what an agent does from startup to shutdown
-- how polling behaves
-- what happens when auth expires
-- what happens on failure or disconnect
+用途：
+
+- エージェントの状態
+- 登録ライフサイクル
+- ポーリングループ
+- トークンリフレッシュの動作
+- ジョブ実行フロー
+- リトライの動作
+- 障害およびオフライン時の処理
+
+このファイルが答えるべき問い：
+
+- エージェントが起動から終了まで何をするか
+- ポーリングがどう動くか
+- 認証が期限切れになったとき何が起きるか
+- 障害や切断時に何が起きるか
 
 ---
 
 ### `api-spec.md`
-Defines external and internal API behavior.
 
-Use this file for:
-- endpoint definitions
-- request and response shapes
-- OpenAI-compatible API behavior
-- future Anthropic-compatible behavior
-- error response format
-- streaming behavior when introduced
+外部および内部 API の動作を定義します。
 
-This file should answer:
-- what each endpoint accepts
-- what each endpoint returns
-- how compatibility behavior is represented
-- what clients can rely on
+用途：
+
+- エンドポイント定義
+- リクエストとレスポンスのシェイプ
+- OpenAI 互換 API の動作
+- 将来の Anthropic 互換動作
+- エラーレスポンスのフォーマット
+- 導入時のストリーミング動作
+
+このファイルが答えるべき問い：
+
+- 各エンドポイントが何を受け取り何を返すか
+- 互換性の動作がどう表現されているか
+- クライアントが何に依存できるか
 
 ---
 
 ### `mvp-scope.md`
-Defines phase boundaries and delivery scope.
 
-Use this file for:
-- MVP definition
-- phase goals
-- in-scope vs out-of-scope by phase
-- implementation ordering
-- milestone boundaries
+フェーズ境界と納品スコープを定義します。
 
-This file should answer:
-- what belongs in Phase 1
-- what is deferred to later phases
-- what “done” means for each phase
+用途：
+
+- MVP の定義
+- フェーズのゴール
+- フェーズごとのスコープ内外
+- 実装順序
+- マイルストーン境界
+
+このファイルが答えるべき問い：
+
+- Phase 1 に何が含まれるか
+- 何が後のフェーズに先送りされるか
+- 各フェーズの「完了」とは何を意味するか
 
 ---
 
 ### `implementation-guide.md`
-Defines how to drive implementation sessions with Claude Code.
 
-Use this file for:
-- phased execution guidance
-- prompt templates
-- implementation checklists
-- recommended task ordering
-- completion gates
+Claude Code を使って実装セッションを進めるための方法を定義します。
 
-This file should answer:
-- how to prompt Claude Code effectively
-- how to break work into phases
-- how to verify progress before moving on
+用途：
 
----
+- フェーズ別の実行ガイダンス
+- プロンプトテンプレート
+- 実装チェックリスト
+- 推奨タスク順序
+- 完了ゲート
 
-## Document responsibilities
+このファイルが答えるべき問い：
 
-To avoid confusion, use the following separation:
-
-- `product-requirements.md` = what must be true
-- `architecture.md` = how the system is organized
-- `security.md` = security and trust rules
-- `agent-lifecycle.md` = runtime behavior of agents
-- `api-spec.md` = interface contracts
-- `mvp-scope.md` = what gets built in each phase
-- `implementation-guide.md` = how to execute work with Claude Code
-
-Do not mix all concerns into one file unless there is a strong reason.
+- Claude Code を効果的にプロンプトする方法
+- 作業をフェーズに分解する方法
+- 次に進む前に進捗を確認する方法
 
 ---
 
-## Update rules
+## ドキュメントの責務分担
 
-When making changes, ask:
+混乱を避けるため、以下の分担を守ること：
 
-### If product behavior changes
-Update:
+- `product-requirements.md` = 何が真であるべきか
+- `architecture.md` = システムがどう構成されているか
+- `security.md` = セキュリティと信頼のルール
+- `agent-lifecycle.md` = エージェントのランタイム動作
+- `api-spec.md` = インターフェース契約
+- `mvp-scope.md` = 各フェーズで何を作るか
+- `implementation-guide.md` = Claude Code との作業の進め方
+
+強い理由がない限り、すべての関心事を1つのファイルにまとめないこと。
+
+---
+
+## 更新ルール
+
+変更を行う際は以下を確認すること：
+
+### プロダクトの動作が変わる場合
+
+更新：
+
 - `product-requirements.md`
-- possibly `mvp-scope.md`
+- 必要に応じて `mvp-scope.md`
 
-### If architecture changes
-Update:
+### アーキテクチャが変わる場合
+
+更新：
+
 - `architecture.md`
-- possibly `agent-lifecycle.md`
-- possibly `security.md`
+- 必要に応じて `agent-lifecycle.md`
+- 必要に応じて `security.md`
 
-### If authentication or trust boundaries change
-Update:
+### 認証または信頼境界が変わる場合
+
+更新：
+
 - `security.md`
 - `agent-lifecycle.md`
-- `api-spec.md` if request/response behavior changes
+- リクエスト/レスポンス動作が変わる場合は `api-spec.md`
 
-### If endpoint behavior changes
-Update:
+### エンドポイントの動作が変わる場合
+
+更新：
+
 - `api-spec.md`
 
-### If phase boundaries change
-Update:
+### フェーズ境界が変わる場合
+
+更新：
+
 - `mvp-scope.md`
 - `implementation-guide.md`
 
-### If Claude Code workflow changes
-Update:
+### Claude Code のワークフローが変わる場合
+
+更新：
+
 - `implementation-guide.md`
-- `CLAUDE.md` if persistent rules changed
+- 永続的なルールが変わった場合は `CLAUDE.md`
 
 ---
 
-## Recommended workflow
+## 推奨ワークフロー
 
-Use this order for non-trivial work:
+非自明な作業はこの順で行うこと：
 
-1. Read `CLAUDE.md`
-2. Read this file (`INDEX.md`)
-3. Read the relevant source docs
-4. Update docs if needed
-5. Implement a small task
-6. Add or update tests
-7. Reconcile docs and code
-8. Summarize what changed and what remains
-
----
-
-## Current priority sequence
-
-The current recommended delivery path is:
-
-1. single Controller
-2. single Agent Host
-3. polling-based execution
-4. local Ollama integration
-5. OpenAI-compatible chat completions
-6. token-based auth and basic auditability
-7. multi-agent and scheduling
-8. Claude Code integration
-9. production hardening
+1. `CLAUDE.md` を読む
+2. このファイル（`INDEX.md`）を読む
+3. 関連する元ドキュメントを読む
+4. 必要であればドキュメントを更新する
+5. 小さなタスクを実装する
+6. テストを追加または更新する
+7. ドキュメントとコードを整合させる
+8. 変更内容と残存課題をまとめる
 
 ---
 
-## If the docs conflict
+## 現在の推奨デリバリーパス
 
-If two docs conflict:
-1. do not guess
-2. identify the conflict explicitly
-3. propose the correct resolution
-4. update the files so one clear source of truth remains
+1. 単一 Controller
+2. 単一 Agent Host
+3. ポーリング型実行
+4. ローカル Ollama 統合
+5. OpenAI 互換 Chat Completions
+6. トークンベース認証と基本的な監査可能性
+7. マルチエージェントとスケジューリング
+8. Claude Code 統合
+9. 本番環境ハードニング
 
 ---
 
-## Future refactor note
+## ドキュメント間の矛盾があった場合
 
-The current flat `docs/` structure is acceptable for early development.
-If the project grows, it can later be split into subdirectories such as:
+1. 推測で解決しない
+2. 矛盾を明示的に特定する
+3. 正しい解決策を提案する
+4. 明確な情報源が1つ残るようにファイルを更新する
+
+---
+
+## 将来のリファクタリングについて
+
+現在のフラットな `docs/` 構造は開発初期に適しています。
+プロジェクトが成長した場合は、以下のようなサブディレクトリへの分割も検討できます：
+
 - `docs/product/`
 - `docs/architecture/`
 - `docs/api/`
 - `docs/security/`
 - `docs/specs/`
 
-Until then, keep filenames stable and responsibilities clear.
+それまでは、ファイル名を安定させ、責務を明確に保つこと。

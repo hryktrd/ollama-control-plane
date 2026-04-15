@@ -1,788 +1,820 @@
-# Implementation Guide
+# 実装ガイド
 
-This document is a phased implementation guide for building **Ollama Control Plane** with Claude Code.
+このドキュメントは、Claude Code を使って **Ollama Control Plane** をフェーズ単位で構築するための実装ガイドです。
 
-It is intended to help drive development in small, reviewable increments while keeping requirements, architecture, API contracts, and security assumptions aligned.
+小さく、レビューしやすいインクリメントで開発を進めながら、要件・アーキテクチャ・API 契約・セキュリティの前提を整合させ続けるために使います。
 
-This file is **not** the primary source of truth for system behavior.
-The source of truth remains:
+このファイルはシステム動作の**一次情報源ではありません**。
+一次情報源は以下のドキュメントです：
 
 - `CLAUDE.md`
-- `docs/requirements/`
-- `docs/architecture/`
-- `docs/api/`
-- `docs/specs/`
-- `docs/adr/`
+- `docs/product-requirements.md`
+- `docs/architecture.md`
+- `docs/api-spec.md`
+- `docs/security.md`
+- `docs/agent-lifecycle.md`
+- `docs/mvp-scope.md`
 
-Use this guide as the execution playbook for Claude Code sessions.
-
----
-
-## How to use this guide
-
-1. Start from the current phase only.
-2. Before implementation, read the referenced docs for that phase.
-3. Copy the relevant Claude Code prompt template into your session.
-4. Ask Claude Code to implement only one small unit at a time.
-5. Review the output, run tests, and update docs.
-6. Move to the next task only after the current task is verified.
+このガイドは Claude Code セッションの実行プレイブックとして使ってください。
 
 ---
 
-## Development principles
+## このガイドの使い方
 
-These rules apply to every phase.
-
-### 1. Docs-first
-Before implementing behavior changes, update the relevant spec or requirements document.
-
-### 2. Small diffs
-Do not ask Claude Code to build an entire phase in one shot.
-Prefer one endpoint, one flow, or one subsystem at a time.
-
-### 3. Test with implementation
-Every meaningful implementation should include tests.
-
-### 4. Backward compatibility
-When moving to a later phase, avoid breaking validated earlier behavior unless explicitly planned and documented.
-
-### 5. Explicit constraints
-State stack, interfaces, auth assumptions, and out-of-scope items up front.
-Claude performs better when constraints are concrete.
-
-### 6. Keep the architecture model-agnostic
-The system must not become Qwen-only.
-Qwen, Gemma, and future Ollama-compatible models should remain possible.
+1. 現在のフェーズのみから始めること。
+2. 実装前に、そのフェーズで参照するドキュメントを読むこと。
+3. 関連する Claude Code プロンプトテンプレートをセッションに貼り付けること。
+4. 一度に一つの小さな単位だけ実装するよう Claude Code に指示すること。
+5. 出力をレビューし、テストを実行し、ドキュメントを更新すること。
+6. 現在のタスクが確認できてから次のタスクに移ること。
 
 ---
 
-## Current target architecture
+## 開発の原則
 
-The project is expected to evolve toward this structure:
+以下のルールはすべてのフェーズに適用されます。
 
-- **Controller**: registration, auth, polling coordination, job dispatch, audit
-- **Agent Host**: local runtime installed on user PCs, connected to local Ollama
-- **Gateway/API**: OpenAI-compatible and Claude Code-friendly endpoints
-- **Model routing layer**: logical model alias to real Ollama model and agent pool
+### 1. ドキュメントファースト
 
-Core architectural assumptions:
+動作変更を実装する前に、関連する仕様または要件ドキュメントを更新すること。
 
-- Pull-based polling from Agent Host to Controller
-- Short-lived polling credentials
-- Bootstrap registration separate from normal operation credentials
-- Ollama remains local to each Agent Host
-- Controller acts as the public control plane
+### 2. 小さい差分
+
+Claude Code にフェーズ全体を一度に作らせないこと。
+1エンドポイント・1フロー・1サブシステムを単位として進めること。
+
+### 3. 実装と同時にテスト
+
+意味のある実装にはテストを伴わせること。
+
+### 4. 後方互換性
+
+後のフェーズに移行する際は、明示的に計画・文書化した場合を除き、検証済みの以前の動作を壊さないこと。
+
+### 5. 明示的な制約
+
+スタック・インターフェース・認証の前提・スコープ外の項目を最初から明示すること。
+制約が具体的であるほど Claude Code のパフォーマンスが上がります。
+
+### 6. アーキテクチャをモデル非依存に保つ
+
+システムを Qwen 専用にしてはいけません。
+Qwen・Gemma・将来の Ollama 対応モデルが引き続き利用可能な状態を維持すること。
 
 ---
 
-## Phase overview
+## 現在のターゲットアーキテクチャ
 
-| Phase | Goal | Expected outcome |
+プロジェクトは以下の構造に向けて発展することを想定しています：
+
+- **Controller**: 登録・認証・ポーリング調整・ジョブ配布・監査
+- **Agent Host**: ユーザーPCにインストールされるローカルランタイム。ローカルの Ollama に接続
+- **Gateway/API**: OpenAI 互換および Claude Code フレンドリーなエンドポイント
+- **モデルルーティング層**: 論理モデルエイリアスから実際の Ollama モデルとエージェントプールへのマッピング
+
+コアアーキテクチャの前提：
+
+- Agent Host から Controller へのプル型ポーリング
+- 短命のポーリング用クレデンシャル
+- 通常の動作用クレデンシャルと分離したブートストラップ登録
+- Ollama は各 Agent Host のローカルに留まる
+- Controller がパブリックなコントロールプレーンとして機能する
+
+---
+
+## フェーズ概要
+
+| フェーズ | ゴール | 期待される成果 |
 |---|---|---|
-| Phase 1 | MVP foundation | Single Controller + single Agent Host + OpenAI-compatible basic API |
-| Phase 2 | Scale-out runtime | Multiple agents, pools, scheduling, streaming, health tracking |
-| Phase 3 | Integration layer | Claude Code integration, Anthropic-compatible API, admin UI, audit improvements |
-| Phase 4 | Production hardening | mTLS, RBAC, advanced rate limiting, deployment automation, monitoring |
+| Phase 1 | MVP 基盤 | 単一 Controller + 単一 Agent Host + OpenAI 互換基本 API |
+| Phase 2 | スケールアウトランタイム | 複数エージェント・プール・スケジューリング・ストリーミング・ヘルス追跡 |
+| Phase 3 | 統合層 | Claude Code 統合・Anthropic 互換 API・管理 UI・監査強化 |
+| Phase 4 | 本番ハードニング | mTLS・RBAC・高度なレート制限・デプロイ自動化・監視 |
 
 ---
 
 # Phase 1: MVP
 
-## Goal
+## ゴール
 
-Build the smallest end-to-end working system with:
+以下を含む最小限のエンドツーエンドシステムを構築する：
 
-- one Controller
-- one Agent Host
-- local Ollama execution
-- OpenAI-compatible chat endpoint
-- polling-based job execution
+- 1台の Controller
+- 1台の Agent Host
+- ローカル Ollama による実行
+- OpenAI 互換の Chat エンドポイント
+- ポーリング型のジョブ実行
 
-## Expected duration
+## 想定期間
 
-Approximately 4–6 weeks.
+約 4～6 週間。
 
-## Phase 1 success criteria
+## Phase 1 の成功基準
 
-- Agent Host can connect to local Ollama.
-- Controller supports agent registration and polling.
-- OpenAI SDK works via `base_url` replacement.
-- One Controller and one Agent Host can complete a job end-to-end.
+- Agent Host がローカルの Ollama に接続できる。
+- Controller がエージェント登録とポーリングをサポートする。
+- OpenAI SDK が `base_url` の置き換えだけで動作する。
+- 1台の Controller と 1台の Agent Host でジョブのエンドツーエンドが完了する。
 
-## Required reference documents
+## 必須参照ドキュメント
 
-Read these before starting Phase 1:
+Phase 1 を始める前に以下を読むこと：
 
-- `docs/product/vision.md`
-- `docs/product/scope.md`
-- `docs/requirements/functional-requirements.md`
-- `docs/requirements/non-functional-requirements.md`
-- `docs/requirements/security-requirements.md`
-- `docs/architecture/overview.md`
-- `docs/architecture/polling-lifecycle.md`
-- `docs/architecture/auth-token-flow.md`
-- `docs/api/openai-compatible.md`
-- `docs/specs/spec-mvp-controller.md`
+- `docs/product-requirements.md`
+- `docs/mvp-scope.md`
+- `docs/architecture.md`
+- `docs/security.md`
+- `docs/agent-lifecycle.md`
+- `docs/api-spec.md`
 
 ---
 
-## Phase 1 implementation scope
+## Phase 1 の実装スコープ
 
 ### Controller
-- FastAPI application bootstrap
-- SQLite persistence for MVP
-- Agent registration endpoint
-- Agent polling endpoint
-- Job result ingestion endpoint
-- OpenAI-compatible chat completions endpoint
-- Models listing endpoint
-- JWT-based polling credentials
-- Basic API key validation
+
+- FastAPI アプリケーションのブートストラップ
+- MVP 用 SQLite 永続化
+- エージェント登録エンドポイント
+- エージェントポーリングエンドポイント
+- ジョブ結果受信エンドポイント
+- OpenAI 互換 Chat Completions エンドポイント
+- モデル一覧エンドポイント
+- JWT ベースのポーリング用クレデンシャル
+- 基本的な API キー検証
 
 ### Agent Host
-- Local runtime service
-- Local Ollama connection
-- Agent registration flow
-- Polling loop
-- Chat completion job execution
-- Result submission
-- Token refresh support
-- Retry and basic failure handling
 
-### Tests
-- Controller unit tests
-- Agent Host unit tests
-- End-to-end integration test:
-  registration -> polling -> job execution -> response return
+- ローカルランタイムサービス
+- ローカル Ollama 接続
+- エージェント登録フロー
+- ポーリングループ
+- Chat Completion ジョブ実行
+- 結果送信
+- トークンリフレッシュサポート
+- リトライと基本的な障害処理
+
+### テスト
+
+- Controller ユニットテスト
+- Agent Host ユニットテスト
+- エンドツーエンド統合テスト：登録 → ポーリング → ジョブ実行 → レスポンス返却
 
 ---
 
-## Phase 1 recommended implementation order
+## Phase 1 の推奨実装順序
 
-### Week 1–2: Foundation
-- Controller project structure
-- settings/config management
-- database layer
-- ORM models
-- schema definitions
-- bootstrap auth helpers
-- JWT issue/verify helpers
+### 第1〜2週：基盤
 
-### Week 2–3: Agent registration flow
-- invitation token validation
+- Controller プロジェクト構造
+- settings/config 管理
+- データベース層
+- ORM モデル
+- スキーマ定義
+- ブートストラップ認証ヘルパー
+- JWT 発行/検証ヘルパー
+
+### 第2〜3週：エージェント登録フロー
+
+- 招待トークン検証
 - `/agents/register`
-- listener token issuance
-- refresh token issuance
-- token refresh endpoint if included in MVP
+- リスナートークン発行
+- リフレッシュトークン発行
+- MVP に含める場合はトークンリフレッシュエンドポイント
 
-### Week 3–4: Polling and job execution
+### 第3〜4週：ポーリングとジョブ実行
+
 - `/agents/poll`
 - `/jobs/{job_id}/result`
-- in-memory job queue
-- agent state updates
+- インメモリジョブキュー
+- エージェント状態更新
 
-### Week 4–5: OpenAI-compatible API
+### 第4〜5週：OpenAI 互換 API
+
 - `/v1/models`
 - `/v1/chat/completions`
-- job creation -> dispatch -> wait -> response mapping
+- ジョブ作成 → 配布 → 待機 → レスポンスマッピング
 
-### Week 5–6: Verification and cleanup
-- pytest coverage improvements
-- integration tests
-- README setup instructions
+### 第5〜6週：検証とクリーンアップ
+
+- pytest カバレッジ改善
+- 統合テスト
+- README セットアップ手順
 - `.env.example`
-- implementation notes
+- 実装ノート
 
 ---
 
-## Phase 1 Claude Code prompt template
+## Phase 1 Claude Code プロンプトテンプレート
 
-Copy and paste this into Claude Code when starting a Phase 1 task.
+Phase 1 タスクを始めるときに Claude Code に貼り付けること。
 
 ```text
-Project: Ollama Control Plane - Phase 1 MVP
+プロジェクト: Ollama Control Plane - Phase 1 MVP
 
-Read first:
+最初に以下を読むこと:
 - docs/INDEX.md
-- docs/product/vision.md
-- docs/requirements/functional-requirements.md
-- docs/requirements/non-functional-requirements.md
-- docs/requirements/security-requirements.md
-- docs/architecture/overview.md
-- docs/architecture/polling-lifecycle.md
-- docs/architecture/auth-token-flow.md
-- docs/api/openai-compatible.md
-- docs/specs/spec-mvp-controller.md
+- docs/product-requirements.md
+- docs/security.md
+- docs/architecture.md
+- docs/agent-lifecycle.md
+- docs/api-spec.md
+- docs/mvp-scope.md
 
-Task:
-Implement the minimum viable Controller and Agent Host for Phase 1.
+タスク:
+Phase 1 の最小限の Controller と Agent Host を実装する。
 
-Tech stack:
+技術スタック:
 - Python 3.10+
 - FastAPI
 - SQLite
 - SQLAlchemy
 - pytest
 
-Controller scope:
-1. FastAPI app bootstrap
-2. settings.py for env-based config
-3. database.py for SQLite
-4. ORM models for agents, jobs, tokens, api_keys
+Controller スコープ:
+1. FastAPI アプリのブートストラップ
+2. 環境変数ベースの設定 (settings.py)
+3. SQLite 用の database.py
+4. agents, jobs, tokens, api_keys の ORM モデル
 5. POST /agents/register
 6. POST /agents/poll
 7. POST /jobs/{job_id}/result
 8. GET /v1/models
 9. POST /v1/chat/completions
 
-Agent Host scope:
-1. Local service package structure
-2. Connect to local Ollama at http://127.0.0.1:11434
-3. Register with invitation token
-4. Keep listener token in memory
-5. Poll Controller
-6. Execute chat completion jobs via Ollama
-7. Submit job results
-8. Refresh token when needed
-9. Retry on transient failures
+Agent Host スコープ:
+1. ローカルサービスのパッケージ構造
+2. http://127.0.0.1:11434 のローカル Ollama に接続
+3. 招待トークンで登録
+4. リスナートークンをメモリに保持
+5. Controller をポーリング
+6. Ollama 経由で Chat Completion ジョブを実行
+7. ジョブ結果を送信
+8. 必要に応じてトークンをリフレッシュ
+9. 一時的な障害時にリトライ
 
-Constraints:
-- Phase 1 is single-agent only
-- No multiple agent pools yet
-- No streaming yet
-- No Docker requirement yet
-- JWT secret must come from env var
-- Follow docs/api/openai-compatible.md for response shape
-- Follow docs/requirements/security-requirements.md for auth assumptions
-- Keep implementation small and reviewable
+制約:
+- Phase 1 は単一エージェントのみ
+- 複数エージェントプールはまだなし
+- ストリーミングはまだなし
+- Docker は必須ではない
+- JWT シークレットは環境変数から取得すること
+- docs/api-spec.md のレスポンス形式に従うこと
+- docs/security.md の認証の前提に従うこと
+- 実装は小さく、レビューしやすい状態に保つこと
 
-Deliverables:
-- Complete implementation under apps/controller and apps/agent-host
-- requirements.txt or pyproject.toml
+成果物:
+- apps/controller と apps/agent-host 以下の完全な実装
+- requirements.txt または pyproject.toml
 - .env.example
-- minimal README setup instructions
-- pytest tests for key flows
+- 最小限の README セットアップ手順
+- 主要フローの pytest テスト
 
-Testing:
-- Add unit tests and at least one end-to-end integration test
-- Aim for >70% coverage
-- Prefer focused tests over broad but shallow ones
+テスト:
+- ユニットテストと最低1つのエンドツーエンド統合テストを追加すること
+- カバレッジ 70% 以上を目標とする
+- 広く浅いテストより、焦点を絞ったテストを優先すること
 
-Important:
-Do not invent behavior not described in docs.
-If anything is ambiguous, stop and propose concrete options before continuing.
+重要:
+ドキュメントに記述されていない動作を作り上げないこと。
+曖昧な点があれば、実装を続ける前に具体的な選択肢を提示すること。
 ```
 
 ---
 
-## Phase 1 checklist
+## Phase 1 チェックリスト
 
 ### Controller
-- [ ] FastAPI app starts
-- [ ] SQLite DB initializes
-- [ ] `/agents/register` validates invitation token and registers agent
-- [ ] `/agents/poll` validates listener token and returns job or 204
-- [ ] `/jobs/{job_id}/result` accepts agent results
-- [ ] `/v1/chat/completions` returns OpenAI-compatible response
-- [ ] `/v1/models` returns available models
-- [ ] JWT secret is env-driven
-- [ ] Tests exist for key flows
+
+- [ ] FastAPI アプリが起動する
+- [ ] SQLite DB が初期化される
+- [ ] `/agents/register` が招待トークンを検証してエージェントを登録する
+- [ ] `/agents/poll` がリスナートークンを検証してジョブまたは 204 を返す
+- [ ] `/jobs/{job_id}/result` がエージェントの結果を受け取る
+- [ ] `/v1/chat/completions` が OpenAI 互換レスポンスを返す
+- [ ] `/v1/models` が利用可能なモデルを返す
+- [ ] JWT シークレットが環境変数から取得される
+- [ ] 主要フローのテストが存在する
 
 ### Agent Host
-- [ ] Agent Host package exists
-- [ ] Local Ollama connection works
-- [ ] Agent can register
-- [ ] Polling loop works
-- [ ] Job execution works
-- [ ] Results are sent back
-- [ ] Token refresh works
-- [ ] Retry logic exists
-- [ ] Tests exist for key flows
 
-### Integration
-- [ ] Controller can start
-- [ ] Agent Host can start
-- [ ] OpenAI SDK can call the gateway/controller endpoint
-- [ ] Agent receives the job
-- [ ] Ollama executes the model call
-- [ ] Response returns to the client correctly
+- [ ] Agent Host パッケージが存在する
+- [ ] ローカル Ollama 接続が動作する
+- [ ] エージェントが登録できる
+- [ ] ポーリングループが動作する
+- [ ] ジョブ実行が動作する
+- [ ] 結果が送信される
+- [ ] トークンリフレッシュが動作する
+- [ ] リトライロジックが存在する
+- [ ] 主要フローのテストが存在する
 
----
+### 統合
 
-## Phase 1 design notes
-
-### Pull-based polling
-Use pull-based polling from Agent Host to Controller.
-This simplifies NAT traversal and avoids exposing local PCs publicly.
-
-### Short-lived tokens
-Use short-lived listener tokens.
-Refresh tokens may exist for token renewal, but bootstrap credentials must remain separate.
-
-### Expandable schema
-Even in MVP, choose table names and relationships that can grow into multi-agent and pool-aware behavior later.
-
-### Queue simplicity
-Use in-memory queueing for MVP if needed.
-Defer Redis/PostgreSQL queueing to later phases.
-
-### Testing matters
-Integration testing should begin in Phase 1 so later phases can preserve behavior with confidence.
+- [ ] Controller が起動できる
+- [ ] Agent Host が起動できる
+- [ ] OpenAI SDK がゲートウェイ/Controllerエンドポイントを呼び出せる
+- [ ] エージェントがジョブを受け取る
+- [ ] Ollama がモデル呼び出しを実行する
+- [ ] レスポンスがクライアントに正しく返される
 
 ---
 
-# Phase 2: Multi-agent and scaling
+## Phase 1 設計メモ
 
-## Goal
+### プル型ポーリング
 
-Expand the MVP to support multiple Agent Hosts, pool-based routing, scheduling, and streaming responses.
+Agent Host から Controller へのプル型ポーリングを使うこと。
+NAT トラバーサルが簡素化され、ローカル PC を公開せずに済みます。
 
-## Expected duration
+### 短命トークン
 
-Approximately 3–4 weeks after Phase 1.
+短命のリスナートークンを使うこと。
+リフレッシュトークンはトークン更新のために存在してもよいが、ブートストラップ用クレデンシャルは分離すること。
 
-## Phase 2 success criteria
+### 拡張可能なスキーマ
 
-- Multiple Agent Hosts can register and execute jobs.
-- Agent Pools exist and are manageable.
-- Scheduler can route jobs using pool and capability constraints.
-- Streaming responses are supported.
-- Offline agents are detected.
+MVP でも、後のマルチエージェント・プール対応に成長できるテーブル名と関係を選ぶこと。
 
-## Required reference documents
+### キューの簡潔さ
 
-- `docs/requirements/functional-requirements.md`
-- `docs/requirements/non-functional-requirements.md`
-- `docs/architecture/agent-pool.md`
-- `docs/architecture/deployment-topology.md`
-- `docs/specs/spec-job-dispatch.md`
-- `docs/specs/spec-model-routing.md`
+必要であれば MVP ではインメモリキューを使うこと。
+Redis/PostgreSQL キューは後のフェーズに先送りする。
+
+### テストの重要性
+
+Phase 1 から統合テストを始めることで、後のフェーズで動作の維持を確実に確認できます。
 
 ---
 
-## Phase 2 implementation scope
+# Phase 2: マルチエージェントとスケーリング
 
-- `agent_pools` data model
-- pool-aware agent registration
-- scheduler
-- resource-aware agent selection
-- SSE or equivalent streaming
-- health tracking and offline detection
-- backward-compatible API evolution
-- schema migration strategy
+## ゴール
+
+MVP を拡張して、複数の Agent Host・プールベースのルーティング・スケジューリング・ストリーミングレスポンスに対応する。
+
+## 想定期間
+
+Phase 1 完了後、約 3～4 週間。
+
+## Phase 2 の成功基準
+
+- 複数の Agent Host が登録してジョブを実行できる。
+- エージェントプールが存在し、管理できる。
+- スケジューラーがプールとケイパビリティの制約を使ってジョブをルーティングできる。
+- ストリーミングレスポンスがサポートされる。
+- オフラインのエージェントが検出される。
+
+## 必須参照ドキュメント
+
+- `docs/product-requirements.md`
+- `docs/architecture.md`
+- `docs/agent-lifecycle.md`
+- `docs/api-spec.md`
 
 ---
 
-## Phase 2 Claude Code prompt template
+## Phase 2 の実装スコープ
+
+- `agent_pools` データモデル
+- プール対応のエージェント登録
+- スケジューラー
+- リソース対応のエージェント選択
+- SSE または同等のストリーミング
+- ヘルス追跡とオフライン検出
+- 後方互換な API 拡張
+- スキーママイグレーション戦略
+
+---
+
+## Phase 2 Claude Code プロンプトテンプレート
 
 ```text
-Project: Ollama Control Plane - Phase 2
+プロジェクト: Ollama Control Plane - Phase 2
 
-Read first:
+最初に以下を読むこと:
 - docs/INDEX.md
-- docs/requirements/functional-requirements.md
-- docs/requirements/non-functional-requirements.md
-- docs/architecture/agent-pool.md
-- docs/architecture/deployment-topology.md
-- docs/specs/spec-job-dispatch.md
-- docs/specs/spec-model-routing.md
+- docs/product-requirements.md
+- docs/architecture.md
+- docs/agent-lifecycle.md
+- docs/api-spec.md
 
-Task:
-Extend the validated Phase 1 implementation to support multiple agents, pools, scheduler logic, and streaming.
+タスク:
+検証済みの Phase 1 実装を拡張して、複数エージェント・プール・スケジューラーロジック・ストリーミングに対応する。
 
-Scope:
-1. Add agent pool support
-2. Add scheduler logic
-3. Add health tracking
-4. Add streaming responses
-5. Preserve Phase 1 compatibility
+スコープ:
+1. エージェントプールサポートを追加する
+2. スケジューラーロジックを追加する
+3. ヘルス追跡を追加する
+4. ストリーミングレスポンスを追加する
+5. Phase 1 の互換性を維持する
 
-Constraints:
-- Do not break validated Phase 1 flows
-- Add migrations or migration planning
-- Keep scheduling logic explainable and testable
-- Prefer minimal complexity before advanced optimization
+制約:
+- 検証済みの Phase 1 フローを壊さないこと
+- マイグレーションまたはマイグレーション計画を追加すること
+- スケジューリングロジックは説明可能でテスト可能な状態に保つこと
+- 高度な最適化より最小限の複雑さを優先すること
 
-Deliverables:
-- updated models
-- scheduler implementation
-- pool-aware APIs if required by spec
-- tests covering multi-agent dispatch
-- streaming tests if implemented
+成果物:
+- 更新されたモデル
+- スケジューラー実装
+- 仕様で必要な場合はプール対応 API
+- マルチエージェント配布をカバーするテスト
+- 実装した場合はストリーミングテスト
 
-Important:
-Before implementing, identify all Phase 1 compatibility risks.
+重要:
+実装前に、Phase 1 との互換性リスクをすべて特定すること。
 ```
 
 ---
 
-## Phase 2 checklist
+## Phase 2 チェックリスト
 
-- [ ] Multiple agents supported
-- [ ] Agent pools supported
-- [ ] Scheduler routes jobs correctly
-- [ ] Resource/capability-aware matching exists
-- [ ] Streaming works
-- [ ] Offline agents are detected
-- [ ] Phase 1 tests still pass
-
----
-
-# Phase 3: Claude Code integration and advanced features
-
-## Goal
-
-Add developer-facing integrations and management functionality.
-
-## Expected duration
-
-Approximately 3–4 weeks after Phase 2.
-
-## Phase 3 success criteria
-
-- Claude Code can use routed local models through the control plane.
-- Anthropic-compatible endpoint exists if still required by integration strategy.
-- Logical model aliases map cleanly to physical models.
-- Admin UI exists for operational visibility.
-- Audit logging is significantly improved.
-
-## Required reference documents
-
-- `docs/api/anthropic-compatible.md`
-- `docs/integrations/claude-code.md`
-- `docs/specs/spec-claude-code-integration.md`
-- `docs/specs/spec-model-routing.md`
-- `docs/requirements/security-requirements.md`
+- [ ] 複数エージェントが動作する
+- [ ] エージェントプールが動作する
+- [ ] スケジューラーが正しくジョブをルーティングする
+- [ ] リソース/ケイパビリティ対応のマッチングが存在する
+- [ ] ストリーミングが動作する
+- [ ] オフラインエージェントが検出される
+- [ ] Phase 1 のテストが引き続き通る
 
 ---
 
-## Phase 3 implementation scope
+# Phase 3: Claude Code 統合と高度な機能
 
-- Anthropic-compatible endpoint if required
-- logical model alias routing
-- Claude Code integration flow
-- admin UI
-- API key management
-- improved audit logs
+## ゴール
+
+開発者向けの統合と管理機能を追加する。
+
+## 想定期間
+
+Phase 2 完了後、約 3～4 週間。
+
+## Phase 3 の成功基準
+
+- Claude Code がコントロールプレーン経由でルーティングされたローカルモデルを使用できる。
+- 統合戦略で必要な場合、Anthropic 互換エンドポイントが存在する。
+- 論理モデルエイリアスが物理モデルに正確にマッピングされる。
+- 運用可視性のための管理 UI が存在する。
+- 監査ログが大幅に改善される。
+
+## 必須参照ドキュメント
+
+- `docs/api-spec.md`
+- `docs/architecture.md`
+- `docs/security.md`
+- `docs/product-requirements.md`
 
 ---
 
-## Phase 3 Claude Code prompt template
+## Phase 3 の実装スコープ
+
+- 必要な場合は Anthropic 互換エンドポイント
+- 論理モデルエイリアスルーティング
+- Claude Code 統合フロー
+- 管理 UI
+- API キー管理
+- 監査ログ改善
+
+---
+
+## Phase 3 Claude Code プロンプトテンプレート
 
 ```text
-Project: Ollama Control Plane - Phase 3
+プロジェクト: Ollama Control Plane - Phase 3
 
-Read first:
+最初に以下を読むこと:
 - docs/INDEX.md
-- docs/api/anthropic-compatible.md
-- docs/integrations/claude-code.md
-- docs/specs/spec-claude-code-integration.md
-- docs/specs/spec-model-routing.md
-- docs/requirements/security-requirements.md
+- docs/api-spec.md
+- docs/architecture.md
+- docs/security.md
+- docs/product-requirements.md
 
-Task:
-Implement Claude Code integration and the supporting compatibility/routing layers.
+タスク:
+Claude Code 統合と対応する互換性/ルーティング層を実装する。
 
-Scope:
-1. Anthropic-compatible endpoint if required
-2. Logical model alias mapping
-3. Claude Code integration documentation and config support
-4. Admin UI for agents, jobs, API keys, and audit logs
-5. Improved audit logging
+スコープ:
+1. 必要な場合は Anthropic 互換エンドポイント
+2. 論理モデルエイリアスマッピング
+3. Claude Code 統合ドキュメントと設定サポート
+4. エージェント・ジョブ・API キー・監査ログの管理 UI
+5. 監査ログ改善
 
-Constraints:
-- Preserve OpenAI-compatible API behavior
-- Keep model aliasing explicit and documented
-- Protect admin features with appropriate auth
-- Treat audit log as append-only where possible
+制約:
+- OpenAI 互換 API の動作を維持すること
+- モデルエイリアスを明示的にドキュメント化すること
+- 管理機能を適切な認証で保護すること
+- 可能な限り監査ログを追記専用として扱うこと
 
-Deliverables:
-- endpoint and routing changes
-- integration docs
-- admin UI implementation
-- audit log enhancements
-- tests for compatibility behavior
+成果物:
+- エンドポイントとルーティングの変更
+- 統合ドキュメント
+- 管理 UI 実装
+- 監査ログ強化
+- 互換性動作のテスト
 ```
 
 ---
 
-## Phase 3 checklist
+## Phase 3 チェックリスト
 
-- [ ] Claude Code integration works
-- [ ] Anthropic-compatible API exists if required
-- [ ] Logical model aliases work
-- [ ] Admin UI exists
-- [ ] Audit logs improved
-- [ ] OpenAI compatibility still works
-
----
-
-# Phase 4: Production hardening
-
-## Goal
-
-Make the system safe and operable for real deployments.
-
-## Expected duration
-
-Approximately 2–3 weeks after Phase 3.
-
-## Phase 4 success criteria
-
-- mTLS is supported for Agent Host to Controller communication
-- RBAC exists
-- advanced rate limiting exists
-- deployment automation exists
-- monitoring and alerting exist
-
-## Required reference documents
-
-- `docs/requirements/security-requirements.md`
-- `docs/architecture/deployment-topology.md`
-- `docs/specs/` relevant deployment/security specs
-- ADRs governing trust boundaries and security decisions
+- [ ] Claude Code 統合が動作する
+- [ ] 必要な場合は Anthropic 互換 API が存在する
+- [ ] 論理モデルエイリアスが動作する
+- [ ] 管理 UI が存在する
+- [ ] 監査ログが改善された
+- [ ] OpenAI 互換性が引き続き動作する
 
 ---
 
-## Phase 4 implementation scope
+# Phase 4: 本番ハードニング
+
+## ゴール
+
+実際のデプロイに対して安全で運用可能なシステムにする。
+
+## 想定期間
+
+Phase 3 完了後、約 2～3 週間。
+
+## Phase 4 の成功基準
+
+- Agent Host から Controller への通信で mTLS がサポートされる。
+- RBAC が存在する。
+- 高度なレート制限が存在する。
+- デプロイ自動化が存在する。
+- 監視とアラートが存在する。
+
+## 必須参照ドキュメント
+
+- `docs/security.md`
+- `docs/architecture.md`
+- `docs/mvp-scope.md`
+
+---
+
+## Phase 4 の実装スコープ
 
 - mTLS
 - RBAC
-- advanced rate limiting
-- deployment automation
-- monitoring and alerting
-- secret handling improvements
+- 高度なレート制限
+- デプロイ自動化
+- 監視とアラート
+- シークレット管理の改善
 
 ---
 
-## Phase 4 Claude Code prompt template
+## Phase 4 Claude Code プロンプトテンプレート
 
 ```text
-Project: Ollama Control Plane - Phase 4
+プロジェクト: Ollama Control Plane - Phase 4
 
-Read first:
+最初に以下を読むこと:
 - docs/INDEX.md
-- docs/requirements/security-requirements.md
-- docs/architecture/deployment-topology.md
-- relevant docs/specs files
-- relevant docs/adr records
+- docs/security.md
+- docs/architecture.md
+- docs/mvp-scope.md
 
-Task:
-Harden the system for production use.
+タスク:
+本番利用に向けてシステムをハードニングする。
 
-Scope:
-1. mTLS for agent-controller communication
+スコープ:
+1. エージェント-Controller 間通信の mTLS
 2. RBAC
-3. Advanced rate limiting
-4. Deployment automation
-5. Monitoring and alerting
+3. 高度なレート制限
+4. デプロイ自動化
+5. 監視とアラート
 
-Constraints:
-- Preserve validated earlier behavior
-- Security defaults must be safe
-- Secrets must not be committed
-- Monitoring must cover auth, job flow, and agent health
+制約:
+- 検証済みの以前の動作を維持すること
+- セキュリティのデフォルトは安全であること
+- シークレットをコミットしないこと
+- 監視は認証・ジョブフロー・エージェントヘルスをカバーすること
 
-Deliverables:
-- security implementation
-- deployment manifests/templates
-- monitoring config
-- tests and operational docs
+成果物:
+- セキュリティ実装
+- デプロイマニフェスト/テンプレート
+- 監視設定
+- テストと運用ドキュメント
 ```
 
 ---
 
-## Phase 4 checklist
+## Phase 4 チェックリスト
 
-- [ ] mTLS implemented
-- [ ] RBAC implemented
-- [ ] Rate limiting improved
-- [ ] Deployment automation exists
-- [ ] Monitoring exists
-- [ ] Security defaults are safe
+- [ ] mTLS が実装された
+- [ ] RBAC が実装された
+- [ ] レート制限が改善された
+- [ ] デプロイ自動化が存在する
+- [ ] 監視が存在する
+- [ ] セキュリティデフォルトが安全である
 
 ---
 
-# General implementation guidelines
+# 一般的な実装ガイドライン
 
-## Testing
-- Write tests with implementation
-- Prefer focused, meaningful tests
-- Keep integration tests running early
-- Coverage target should be meaningful, not cosmetic
+## テスト
 
-## Error handling
-- Use a consistent error format
-- Return correct HTTP status codes
-- Distinguish validation, auth, routing, and execution errors
+- 実装とともにテストを書くこと
+- 焦点を絞った意味のあるテストを優先すること
+- 統合テストを早期から実行し続けること
+- カバレッジ目標は形式的ではなく意味のあるものにすること
 
-## Secret handling
-- Keep `.env`, `.env.local`, certs, and local secrets out of git
-- Use `.env.example` for non-secret examples
-- In production, prefer env injection or a secret manager
+## エラー処理
 
-## Database evolution
-- MVP may start with SQLite
-- Use proper migration tooling before schema complexity grows
-- Do not hide schema-breaking changes
+- 一貫したエラーフォーマットを使うこと
+- 正しい HTTP ステータスコードを返すこと
+- バリデーション・認証・ルーティング・実行エラーを区別すること
 
-## Documentation
-- Update docs whenever behavior changes
-- Keep API examples current
-- Keep requirements and specs aligned with code
+## シークレット管理
 
-## Versioning
-Tag major phase milestones if useful, for example:
+- `.env`・`.env.local`・証明書・ローカルシークレットを git に含めないこと
+- 非シークレットのサンプルは `.env.example` を使うこと
+- 本番環境では環境変数注入またはシークレットマネージャーを優先すること
+
+## データベース進化
+
+- MVP は SQLite から始めてよい
+- スキーマの複雑さが増す前に適切なマイグレーションツールを使うこと
+- スキーマ破壊的な変更を隠さないこと
+
+## ドキュメント
+
+- 動作が変わるたびにドキュメントを更新すること
+- API の例を最新に保つこと
+- 要件と仕様をコードと整合させること
+
+## バージョニング
+
+主要なフェーズマイルストーンには必要に応じてタグを付けること：
 
 ```bash
-git tag -a v0.1.0-phase1-mvp -m "Phase 1 MVP complete"
+git tag -a v0.1.0-phase1-mvp -m "Phase 1 MVP 完了"
 git push origin --tags
 ```
 
 ---
 
-# Effective prompting patterns for Claude Code
+# Claude Code への効果的なプロンプトパターン
 
-## Good patterns
+## 良いパターン
 
-### Be explicit
-Instead of:
+### 明示的に指示する
+
+悪い例：
 ```text
-Make a nice endpoint
+良いエンドポイントを作って
 ```
 
-Use:
+良い例：
 ```text
-Implement POST /agents/register according to docs/api/controller-api.md and docs/architecture/auth-token-flow.md
+docs/api-spec.md と docs/security.md に従って POST /agents/register を実装してください
 ```
 
-### Provide constraints
-Instead of:
+### 制約を明示する
+
+悪い例：
 ```text
-Build Phase 1
+Phase 1 を作って
 ```
 
-Use:
+良い例：
 ```text
-Implement only the Controller registration flow for Phase 1.
-Do not add multiple agent support.
-Add tests.
+Phase 1 の Controller 登録フローのみを実装してください。
+マルチエージェントサポートは追加しないでください。
+テストを追加してください。
 ```
 
-### Reference documents
-Instead of:
+### ドキュメントを参照する
+
+悪い例：
 ```text
-Use the architecture
+アーキテクチャに従って
 ```
 
-Use:
+良い例：
 ```text
-Follow docs/architecture/polling-lifecycle.md for polling semantics and docs/requirements/security-requirements.md for token handling assumptions.
+ポーリングのセマンティクスは docs/agent-lifecycle.md に従い、
+トークン管理の前提は docs/security.md に従ってください。
 ```
 
-### Require verification
-Instead of:
+### 検証を求める
+
+悪い例：
 ```text
-Implement it
+実装してください
 ```
 
-Use:
+良い例：
 ```text
-Implement it, add tests, and summarize any unresolved ambiguity.
+実装し、テストを追加し、未解決の曖昧な点をまとめてください。
 ```
 
 ---
 
-## Avoid these patterns
+## 避けるべきパターン
 
-### Vague requests
-Do not ask for “something good” or “a full system” without boundaries.
+### 曖昧な依頼
 
-### Overloading a single session
-Do not ask Claude Code to build an entire phase in one prompt.
+境界なしに「良いものを」や「フルシステムを」と依頼しないこと。
 
-### Silent architecture changes
-Do not let implementation drift beyond the spec or ADRs without updating docs.
+### 1セッションへの詰め込み
+
+フェーズ全体を1プロンプトで作らせないこと。
+
+### 暗黙のアーキテクチャ変更
+
+仕様を更新せずに実装が仕様から乖離しないようにすること。
 
 ---
 
 # FAQ
 
-## What if Claude Code output quality is low?
-Check whether:
-- the referenced docs are clear
-- the task is too large
-- the constraints are too vague
-- the expected outputs are not explicit enough
+## Claude Code の出力品質が低い場合
 
-## What if the logic is complex?
-Ask Claude Code first to propose:
-- a flow
-- a data model
-- edge cases
-- a test plan
+以下を確認してください：
 
-Then ask it to implement.
+- 参照ドキュメントが明確か
+- タスクが大きすぎないか
+- 制約が曖昧すぎないか
+- 期待する成果物が明示されているか
 
-## What if security is important?
-Quote the relevant sections from:
-- `docs/requirements/security-requirements.md`
-- `docs/architecture/auth-token-flow.md`
-- related ADRs
+## ロジックが複雑な場合
 
-## What if the existing code must not break?
-Tell Claude Code explicitly:
-- no breaking API changes
-- preserve Phase 1 behavior
-- update tests for backward compatibility
+まず Claude Code に以下を提案させてください：
 
----
+- フロー
+- データモデル
+- エッジケース
+- テスト計画
 
-# Phase completion gates
+その後に実装を依頼してください。
 
-## Phase 1 complete when
-- [ ] Agent Host can connect to Ollama
-- [ ] Controller starts successfully
-- [ ] Agent registration works
-- [ ] Polling works
-- [ ] `/v1/chat/completions` works
-- [ ] single-agent job loop works
-- [ ] tests are passing
-- [ ] setup docs exist
+## セキュリティが重要な場合
 
-## Phase 2 complete when
-- [ ] multiple agents work
-- [ ] pools work
-- [ ] scheduling works
-- [ ] streaming works
-- [ ] Phase 1 tests still pass
+以下から関連セクションを引用してください：
 
-## Phase 3 complete when
-- [ ] Claude Code integration works
-- [ ] compatibility layer works as designed
-- [ ] model alias routing works
-- [ ] admin tooling exists
-- [ ] auditability improves
+- `docs/security.md`
+- `docs/agent-lifecycle.md`（認証フロー関連）
 
-## Phase 4 complete when
-- [ ] transport security is hardened
-- [ ] access control is hardened
-- [ ] production deployment paths exist
-- [ ] monitoring exists
-- [ ] operational docs exist
+## 既存コードを壊してはいけない場合
+
+Claude Code に明示的に伝えてください：
+
+- API の破壊的変更なし
+- Phase 1 の動作を維持すること
+- 後方互換性のためのテスト更新
 
 ---
 
-# Final note
+# フェーズ完了ゲート
 
-Use this guide to keep Claude Code sessions focused, small, and verifiable.
+## Phase 1 完了条件
 
-The most reliable workflow is:
+- [ ] Agent Host が Ollama に接続できる
+- [ ] Controller が正常に起動する
+- [ ] エージェント登録が動作する
+- [ ] ポーリングが動作する
+- [ ] `/v1/chat/completions` が動作する
+- [ ] 単一エージェントのジョブループが動作する
+- [ ] テストが通っている
+- [ ] セットアップドキュメントが存在する
 
-1. update docs
-2. implement one bounded task
-3. run tests
-4. review behavior
-5. update docs again if needed
+## Phase 2 完了条件
 
-Do not optimize for speed at the cost of traceability.
+- [ ] 複数エージェントが動作する
+- [ ] プールが動作する
+- [ ] スケジューリングが動作する
+- [ ] ストリーミングが動作する
+- [ ] Phase 1 のテストが引き続き通る
+
+## Phase 3 完了条件
+
+- [ ] Claude Code 統合が動作する
+- [ ] 互換性層が設計通りに動作する
+- [ ] モデルエイリアスルーティングが動作する
+- [ ] 管理ツールが存在する
+- [ ] 監査可能性が改善された
+
+## Phase 4 完了条件
+
+- [ ] トランスポートセキュリティがハードニングされた
+- [ ] アクセス制御がハードニングされた
+- [ ] 本番デプロイのパスが存在する
+- [ ] 監視が存在する
+- [ ] 運用ドキュメントが存在する
+
+---
+
+# 最後に
+
+このガイドを使って Claude Code セッションを小さく・焦点を絞って・検証可能に保ってください。
+
+最も信頼できるワークフローは：
+
+1. ドキュメントを更新する
+2. 1つの境界を持つタスクを実装する
+3. テストを実行する
+4. 動作をレビューする
+5. 必要であれば再度ドキュメントを更新する
+
+スピードを追求してトレーサビリティを犠牲にしないでください。
