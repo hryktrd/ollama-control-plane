@@ -440,6 +440,64 @@ Client (Python/Node.js)           API Gateway              Controller
        (Private)      (Private)      (Private)
 ```
 
+## 初期構成の具体的デプロイトポロジー
+
+### Agent Host: Windows + WSL2 + Docker
+
+```
+Windows 11
+└─ WSL2 (Ubuntu)
+   ├─ Ollama（ネイティブインストール、GPU直接使用）
+   │   ├─ GPU: RTX 5060 Ti 16GB VRAM
+   │   ├─ モデル: qwen2.5-coder:14b（Q4_K_M量子化、約8.7GB VRAM）
+   │   └─ バインド: 127.0.0.1:11434（WSL2内ローカルのみ）
+   └─ Docker Engine（WSL2内）
+       └─ agent-host コンテナ
+           ├─ OLLAMA_URL=http://host.docker.internal:11434
+           └─ CONTROLLER_URL=https://[subdomain].pontium.org
+```
+
+**OllamaをDockerの外で動かす理由**: WSL2 DockerコンテナからGPUを使うにはNVIDIA Container Toolkitの設定が必要で複雑になる。OllamaをWSL2ホスト上で直接動かすことでGPUパススルーが安定し、セットアップが簡潔になる。
+
+**`host.docker.internal`**: WSL2内のDockerコンテナからWSL2ホストへのアクセスに使用する。Docker EngineはWSL2環境でこのホスト名を自動的にWSL2ホストIPに解決する。
+
+### Controller Server: Ubuntu Server
+
+```
+Ubuntu Server (LTS)
+├─ ドメイン: [subdomain].pontium.org（例: ocp.pontium.org）
+├─ TLS: Let's Encrypt（certbot自動更新）
+└─ Docker Compose
+    ├─ nginx（TLS終端・リバースプロキシ）
+    │   ├─ :443 → HTTPS（Let's Encrypt証明書マウント）
+    │   └─ proxy_pass → controller:8000（内部HTTP）
+    ├─ controller（FastAPI, :8000内部）
+    │   └─ SQLite（MVP） → PostgreSQL（Phase 2）
+    └─ certbot（証明書自動更新サイドカー）
+```
+
+**TLS終端をNginxで行う理由**: Let's EncryptのcertbotとNginxの組み合わせが運用実績として安定しており自動更新が容易。FastAPIはHTTPで内部通信し、NginxがすべてのTLS処理を担う。
+
+### ネットワーク通信経路（具体的）
+
+```
+[WSL2 agent-host コンテナ]
+    │
+    │ HTTPS アウトバウンド（NAT越え可能）
+    ▼
+[pontium.org サブドメイン]
+    │ :443
+    ▼
+[Ubuntu Server - Nginx]
+    │ HTTP proxy_pass
+    ▼
+[Ubuntu Server - Controller FastAPI :8000]
+```
+
+Agent HostはアウトバウンドHTTPS（443）のみ使用するため、NAT/ファイアウォール下の家庭ネットワークでも追加設定不要。
+
+---
+
 ## 拡張性ポイント
 
 1. **モデル追加**: Models テーブルに登録し、pool_id でルーティング

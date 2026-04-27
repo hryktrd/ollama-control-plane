@@ -105,12 +105,18 @@ agent-host/
 - [ ] Streaming support （MVP では非流処理版を優先）
 - [ ] Multi-model support （単一モデルで試行）
 
-**スタック候補**:
+**スタック**:
 - Python 3.10+
 - `aiohttp` または `httpx` (async HTTP)
 - `pydantic` (data validation)
 - `python-jose` (JWT)
-- `requests` (同期フォールバック)
+- Docker（WSL2内でコンテナ実行）
+
+**実行環境**:
+- WSL2 Ubuntu上のDockerコンテナとして動作
+- OllamaはWSL2ホストにネイティブインストール（GPU直接使用）
+- `OLLAMA_URL=http://host.docker.internal:11434` でOllamaに接続
+- systemd（WSL2）でDockerコンテナを自動起動
 
 ---
 
@@ -579,44 +585,139 @@ Advanced Features:
 
 ---
 
-## デプロイ・実行方法（MVP予定）
+## デプロイ・実行方法（MVP）
+
+### Ubuntu Server: Controller セットアップ
+
+**前提**: pontium.orgのサブドメインのDNSがサーバIPを向いていること。
 
 ```bash
-# 1. Controller Setup
+# 1. Docker + certbot セットアップ
+sudo apt install docker.io docker-compose certbot python3-certbot-nginx
+
+# 2. Let's Encrypt 証明書取得（初回）
+sudo certbot --nginx -d ocp.pontium.org
+
+# 3. Controller + Nginx を Docker Compose で起動
 cd controller
-export DATABASE_URL="sqlite:///./test.db"
-export CONTROLLER_SECRET=$(python -c "import secrets; print(secrets.token_urlsafe(32))")
-export JWT_ALGORITHM="HS256"
+# .env ファイルを作成
+cat > .env <<EOF
+DATABASE_URL=sqlite:///./data/controller.db
+CONTROLLER_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+JWT_ALGORITHM=HS256
+ADMIN_API_KEY=$(python3 -c "import secrets; print(secrets.token_urlsafe(32))")
+EOF
 
-pip install -r requirements.txt
-uvicorn main:app --host 0.0.0.0 --port 8000
+docker compose up -d
 
-# 2. Invite Agent
-curl -X POST http://localhost:8000/admin/tokens/invite \
+# 4. 招待トークン発行
+curl -X POST https://ocp.pontium.org/admin/tokens/invite \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <admin-key>" \
+  -H "Authorization: Bearer <ADMIN_API_KEY>" \
   -d '{"pool_id": "default", "expires_in_days": 7}'
+```
 
-# 3. Agent Setup
-cd ../agent-host
-export INVITATION_TOKEN="inv_xxxx"
-export CONTROLLER_URL="http://localhost:8000"
-export OLLAMA_URL="http://127.0.0.1:11434"
+**Docker Compose 構成**（`controller/docker-compose.yml` 予定）:
+```yaml
+services:
+  controller:
+    build: .
+    env_file: .env
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped
 
-pip install -r requirements.txt
-python agent_host.py
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "443:443"
+      - "80:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    depends_on:
+      - controller
+    restart: unless-stopped
+```
 
-# 4. Client Test
-python -c "
+**Nginx 設定**（`controller/nginx.conf` 予定）:
+```nginx
+server {
+    listen 443 ssl;
+    server_name ocp.pontium.org;
+
+    ssl_certificate /etc/letsencrypt/live/ocp.pontium.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ocp.pontium.org/privkey.pem;
+
+    location / {
+        proxy_pass http://controller:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+}
+
+server {
+    listen 80;
+    server_name ocp.pontium.org;
+    return 301 https://$host$request_uri;
+}
+```
+
+---
+
+### Windows WSL2: Ollama + Agent Host セットアップ
+
+```bash
+# 1. WSL2 Ubuntu で Ollama インストール
+curl -fsSL https://ollama.com/install.sh | sh
+
+# 2. モデルを取得（RTX 5060 Ti 16GB 向け推奨モデル）
+ollama pull qwen2.5-coder:14b
+
+# 3. Ollama を起動（WSL2ホストのローカルのみ公開）
+OLLAMA_HOST=127.0.0.1 ollama serve
+
+# 4. Agent Host を Docker で起動
+cd agent-host
+cat > .env <<EOF
+CONTROLLER_URL=https://ocp.pontium.org
+INVITATION_TOKEN=inv_xxxx
+OLLAMA_URL=http://host.docker.internal:11434
+EOF
+
+docker compose up -d
+```
+
+**Agent Host Docker Compose**（`agent-host/docker-compose.yml` 予定）:
+```yaml
+services:
+  agent-host:
+    build: .
+    env_file: .env
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+```
+
+**`extra_hosts: host-gateway`**: Docker EngineがWSL2ホストIPを自動解決できない場合のフォールバック。`host.docker.internal` → WSL2ホスト（Ollama）への接続を保証する。
+
+---
+
+### クライアントテスト
+
+```python
 import openai
-openai.api_key = 'sk-test'
-openai.base_url = 'http://localhost:8000/'
-response = openai.chat.completions.create(
-  model='qwen-coder',
-  messages=[{'role': 'user', 'content': 'Hello'}]
+
+client = openai.OpenAI(
+    api_key="sk-test",
+    base_url="https://ocp.pontium.org/v1/"
+)
+
+response = client.chat.completions.create(
+    model="qwen2.5-coder:14b",
+    messages=[{"role": "user", "content": "Hello"}]
 )
 print(response.choices[0].message.content)
-"
 ```
 
 ---

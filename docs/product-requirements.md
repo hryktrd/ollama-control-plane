@@ -44,16 +44,34 @@
 
 ## 機能要件
 
+### モデル選択の設計方針
+
+モデルはエージェント側で固定せず、**リクエスト時に指定する**。AzureのデプロイIDと同様の考え方。
+
+- Agent Hostは起動時に Ollama の `GET /api/tags` を呼び出し、**インストール済みモデルを自動検出**して登録時に報告する
+- クライアントはリクエストの `model` フィールドに使いたいモデルを指定する（例: `"qwen2.5-coder:14b"`）
+- Controllerは指定モデルを持つエージェントを探してジョブを配布する
+- エージェント側に特定モデルを固定する設定は持たない
+
+```
+Client:  POST /v1/chat/completions  { "model": "qwen2.5-coder:14b", ... }
+                  ↓
+Controller:  "qwen2.5-coder:14b" を持つエージェントを検索してルーティング
+                  ↓
+Agent:   Ollama に指定モデルで実行依頼  → http://localhost:11434/api/chat
+```
+
 ### エージェント登録フロー
 
 - Agent Hostは初回登録時に**招待トークン**（または登録用トークン）でControllerへ登録
+- 登録時、Agent Hostは Ollama から取得したモデルリストを報告する
 - Controller払い出し項目：
   - `agent_id`: 一意のエージェント識別子
   - `pool_id`: 所属するプール
   - `listener_token`: 短命ポーリング用トークン
   - `refresh_token`: トークン更新用（オプション）
   - `poll_interval`: ポーリング間隔（秒）
-  - `assigned_capabilities`: 利用可能モデル、ツール
+  - `available_models`: Controllerが確認・承認したモデルリスト
   - `max_concurrency`: 最大同時実行数
 
 - 登録後、管理者権限は永続保持しない
@@ -66,11 +84,11 @@
   - `online`, `idle`, `busy`, `offline`, `error`
   - CPU負荷率
   - GPU/VRAM使用状況
-  - ロード済みモデル
-  -実行中ジョブ数
+  - 現在Ollamaにロード済みのモデル（`ollama ps` 相当）
+  - 実行中ジョブ数
   - ジョブキュー長
 
-- Controllerはエージェントの**リソース情報を保持**し、スケジューリングに利用
+- Controllerはエージェントの**リソース情報とモデルリストを保持**し、スケジューリングに利用
 
 ### ジョブ実行
 
