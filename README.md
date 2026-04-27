@@ -1,206 +1,463 @@
 # Ollama Control Plane
 
-ローカルPC上の Ollama/Qwen Coder をエージェント化し、中央コントローラがジョブを配布するシステムです。
-OpenAI互換API と Claude Code 接続の両方をサポートします。
-
-## 🎯 目的
-
-- **分散推論**: 複数PCのローカルLLM（Qwen Coder等）を一元管理
-- **中央ジョブ配分**: Controller がエージェントプールへジョブを配布
-- **複数インターフェース**: OpenAI SDK、Anthropic SDK、独自CLIから接続可能
-- **セキュリティ**: TLS、短命トークン、API key認証により安全に運用
-
-## 📚 ドキュメント
-
-実装に先立ち、以下のドキュメントを参照してください（優先順）:
-
-| ドキュメント | 目的 |
-|-----------|------|
-| [product-requirements.md](./docs/product-requirements.md) | 要件定義、システム全体像、ユースケース |
-| [mvp-scope.md](./docs/mvp-scope.md) | MVP範囲、Phase 1-4の実装計画、タイムライン |
-| [architecture.md](./docs/architecture.md) | システムアーキテクチャ、コンポーネント設計、データフロー |
-| [api-spec.md](./docs/api-spec.md) | Agent API、User API、Admin API の仕様 |
-| [security.md](./docs/security.md) | 認証設計、暗号化、認可、レート制限 |
-| [agent-lifecycle.md](./docs/agent-lifecycle.md) | Agent Host のステートマシン、ポーリングフロー、トークン更新 |
-
-## 🏗️ システム構成
+ローカルPCで動く Ollama モデルをエージェント化し、中央の Controller がジョブを配布するシステムです。  
+OpenAI 互換 API (`/v1/chat/completions`) でアクセスできます。
 
 ```
-┌─────────────────────────────────────────────────────┐
-│           Client Applications                        │
-│  (Python SDK, Claude Code, Node.js, Custom CLI)     │
-└──────────────────┬──────────────────────────────────┘
-                   │
-                   ▼
-        ┌──────────────────────┐
-        │  API Gateway/Proxy   │
-        │ - /v1/chat/... (OpenAI)
-        │ - /v1/messages (Anthropic)
-        │ - API Key Auth
-        └──────────────┬───────┘
-                       │
-                       ▼
-        ┌──────────────────────┐
-        │ Controller Server    │
-        │ - Agent Registry     │
-        │ - Job Queue          │
-        │ - State Management   │
-        │ - /agents/register   │
-        │ - /agents/poll       │
-        └──────────────┬───────┘
-                       │
-         ┌─────────────┼─────────────┐
-         ▼             ▼             ▼
-    ┌─────────┐  ┌─────────┐  ┌─────────┐
-    │ Agent 1 │  │ Agent 2 │  │ Agent N │
-    │ (PC-A)  │  │ (PC-B)  │  │ (PC-N)  │
-    │         │  │         │  │         │
-    │ Ollama  │  │ Ollama  │  │ Ollama  │
-    │ qwen-   │  │ qwen-   │  │ gemma   │
-    │ coder   │  │ coder   │  │         │
-    └─────────┘  └─────────┘  └─────────┘
+クライアント (Python/curl 等)
+    │  HTTPS  POST /v1/chat/completions
+    ▼
+Controller Server (Ubuntu + Docker + Nginx + Let's Encrypt)
+    │  HTTPS  polling / job dispatch
+    ▼
+Agent Host (Windows WSL2 + Docker + Ollama)
+    │  localhost
+    ▼
+Ollama (qwen2.5-coder:14b 等)
 ```
-
-## 🚀 クイックスタート（MVP Phase）
-
-### 前提条件
-
-- **Agent Host**: Python 3.10+、Ollama 稼働中 (port 11434)
-- **Controller**: Python 3.10+、PostgreSQL or SQLite
-- **Client**: OpenAI SDK 1.0+、またはAnthropic SDK
-
-### インストール & 実行
-
-```bash
-# 1. リポジトリクローン
-git clone https://github.com/your-org/ollama-control-plane
-cd ollama-control-plane
-
-# 2. Controller サーバ起動
-cd controller
-pip install -r requirements.txt
-export DATABASE_URL="sqlite:///./ollama_cp.db"
-uvicorn main:app --host 0.0.0.0 --port 8000
-
-# 3. 別ターミナル: Agent Host トークン生成
-curl -X POST http://localhost:8000/admin/tokens/invite \
-  -H "Content-Type: application/json" \
-  -H "Authorization: Bearer <admin-key>" \
-  -d '{"pool_id": "default", "expires_in_days": 7}'
-
-# 4. Agent Host セットアップ・実行
-cd ../agent-host
-pip install -r requirements.txt
-export INVITATION_TOKEN="inv_xxxxxx"
-export CONTROLLER_URL="http://localhost:8000"
-python agent_host.py
-
-# 5. クライアント側でテスト
-import openai
-openai.api_key = "sk-test-key"
-openai.base_url = "http://localhost:8000/"
-
-response = openai.chat.completions.create(
-    model="qwen-coder",
-    messages=[{"role": "user", "content": "Write a hello world function"}]
-)
-
-print(response.choices[0].message.content)
-```
-
-## 🔐 セキュリティ
-
-- **通信**: TLS 1.2 以上（mTLS 対応予定）
-- **認証**: 招待トークン（初回登録）→ 短命 JWT（待受）
-- **APIキー**: OpenAI互換、per-user quota、レート制限
-
-詳細は [security.md](./docs/security.md) を参照。
-
-## 📊 実装計画
-
-### Phase 1 (MVP) - 4-6週間
-- [x] ドキュメント作成
-- [ ] Agent Host 基本実装
-- [ ] Controller フレームワーク
-- [ ] OpenAI /v1/chat/completions 対応
-
-### Phase 2 - 3-4週間
-- [ ] 複数Agent対応
-- [ ] Agent Pool & スケジューリング
-- [ ] ストリーミング対応
-
-### Phase 3 - 3-4週間
-- [ ] Claude Code 統合
-- [ ] Anthropic互換エンドポイント
-- [ ] Web管理UI
-
-### Phase 4 - 2-3週間
-- [ ] mTLS
-- [ ] 詳細監査ログ
-- [ ] 本番運用機能
-
-詳細は [mvp-scope.md](./docs/mvp-scope.md) を参照。
-
-## 🛠️ プロジェクト構成（予定）
-
-```
-ollama-control-plane/
-├── docs/
-│   ├── product-requirements.md
-│   ├── architecture.md
-│   ├── api-spec.md
-│   ├── security.md
-│   ├── agent-lifecycle.md
-│   └── mvp-scope.md
-├── controller/
-│   ├── main.py
-│   ├── requirements.txt
-│   ├── database/
-│   ├── api/
-│   ├── core/
-│   └── tests/
-├── agent-host/
-│   ├── agent_host.py
-│   ├── requirements.txt
-│   ├── config/
-│   ├── core/
-│   └── tests/
-├── client-examples/
-│   ├── python_sdk_example.py
-│   ├── nodejs_sdk_example.js
-│   └── custom_cli.py
-├── docker-compose.yml
-├── Dockerfile.controller
-├── Dockerfile.agent-host
-└── README.md
-```
-
-## 📖 用語集
-
-| 用語 | 説明 |
-|-----|------|
-| **Agent Host** | 各PC上で動く常駐プロセス、Ollama/Qwen Coder を実行ノード |
-| **Controller** | エージェント登録・認証・ジョブ配布・状態管理の中央サーバ |
-| **Listener Token** | Agent Host がポーリング・待受に使う短命JWT |
-| **Invitation Token** | Agent初回登録のみに使う一回限りトークン |
-| **API Key** | ユーザーが OpenAI/Anthropic 互換API を呼び出す際の認証 |
-| **Agent Pool** | エージェントの論理グループ（例: desktop-gpu, laptop-cpu） |
-| **Job** | ユーザーから投入された推論リクエスト |
-
-## 🤝 貢献
-
-このプロジェクトは段階的に Claude Code を活用しながら実装を進めます。
-各Phaseで基本設計と実装手順が明確なため、拡張・改善も容易です。
-
-## 📝 ライセンス
-
-（TBD）
-
-## 📧 連絡先
-
-質問・提案は Issue を通じてお願いします。
 
 ---
 
-**Last Updated**: 2026-04-14  
-**Phase**: Design & Documentation (Phase 0)
+## 1. Controller サーバのセットアップ（Ubuntu Server）
+
+### 前提
+
+- Ubuntu Server 22.04 LTS
+- Nginx インストール済み・起動中
+- ドメインの A レコードをサーバ IP に向けている（例: `ocp.example.org`）
+- `ubuntu` ユーザーで SSH ログイン可能
+
+### 1-1. Docker CE インストール
+
+```bash
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+# シェルを再ログインするか以下を実行
+newgrp docker
+```
+
+### 1-2. Let's Encrypt 証明書取得
+
+certbot が未インストールの場合:
+
+```bash
+sudo apt-get install -y certbot
+```
+
+証明書取得（webroot 方式。既存サイトの `/var/www/html` を使用）:
+
+```bash
+sudo certbot certonly --webroot -w /var/www/html -d ocp.example.org
+```
+
+取得した証明書は `/etc/letsencrypt/live/ocp.example.org/` に保存されます。
+
+自動更新の確認:
+
+```bash
+sudo systemctl status certbot.timer
+```
+
+### 1-3. Nginx バーチャルホスト追加
+
+既存の Nginx 設定を壊さず、新しいファイルとして追加します。
+
+```bash
+sudo nano /etc/nginx/sites-available/ocp.example.org.conf
+```
+
+以下を貼り付け（`ocp.example.org` を自分のドメインに変更）:
+
+```nginx
+server {
+    listen 80;
+    listen [::]:80;
+    server_name ocp.example.org;
+
+    # Let's Encrypt 更新用（webroot 共有）
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl http2;
+    listen [::]:443 ssl http2;
+    server_name ocp.example.org;
+
+    ssl_certificate     /etc/letsencrypt/live/ocp.example.org/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/ocp.example.org/privkey.pem;
+
+    # ジョブ待機のロングポーリング（30秒）に対応
+    proxy_read_timeout 60s;
+
+    location / {
+        proxy_pass         http://127.0.0.1:8200;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+有効化してリロード:
+
+```bash
+sudo ln -s /etc/nginx/sites-available/ocp.example.org.conf /etc/nginx/sites-enabled/
+sudo nginx -t        # 設定テスト
+sudo systemctl reload nginx
+```
+
+### 1-4. Controller デプロイ
+
+```bash
+# コードをサーバに配置
+sudo mkdir -p /opt/ollama-control-plane
+sudo chown $USER:$USER /opt/ollama-control-plane
+cd /opt/ollama-control-plane
+git clone <このリポジトリの URL> .
+# または scp / rsync でコピー
+
+cd controller
+```
+
+`.env` ファイルを作成（値は必ず自分で生成したランダム文字列に変える）:
+
+```bash
+cat > .env << 'EOF'
+DATABASE_URL=sqlite+aiosqlite:///./data/controller.db
+CONTROLLER_SECRET=<openssl rand -base64 32 で生成>
+JWT_ALGORITHM=HS256
+LISTENER_TOKEN_TTL_HOURS=2
+POLL_TIMEOUT_SECONDS=30
+JOB_TIMEOUT_SECONDS=300
+ADMIN_API_KEY=<openssl rand -base64 32 で生成>
+EOF
+```
+
+シークレットの生成方法:
+
+```bash
+openssl rand -base64 32
+```
+
+起動:
+
+```bash
+sudo docker compose up -d
+```
+
+ヘルスチェック:
+
+```bash
+curl -s https://ocp.example.org/health
+# {"status":"ok"} が返れば OK
+```
+
+### 1-5. 招待トークンと API キーの発行
+
+エージェントを登録するための招待トークン（1回限り）:
+
+```bash
+curl -s -X POST https://ocp.example.org/admin/tokens/invite \
+  -H "Authorization: Bearer <ADMIN_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"pool_id": "default", "max_uses": 1}'
+```
+
+クライアントが `/v1/chat/completions` を呼ぶ API キー:
+
+```bash
+curl -s -X POST https://ocp.example.org/admin/api-keys \
+  -H "Authorization: Bearer <ADMIN_API_KEY>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "my-key", "user_id": "user-1"}'
+```
+
+---
+
+## 2. Agent Host のセットアップ（Windows WSL2）
+
+### 前提
+
+- WSL2 Ubuntu 22.04 が起動している
+- Docker（`docker.io` または Docker CE）と `docker compose` が使える状態
+- RTX GPU 搭載 PC 推奨（CPU でも動作可）
+
+### 2-1. Ollama インストール
+
+WSL2 ターミナルで実行:
+
+```bash
+curl -fsSL https://ollama.com/install.sh | sh
+```
+
+インストール後、サービスの起動確認:
+
+```bash
+systemctl is-active ollama   # "active" と表示されれば OK
+```
+
+サービスが起動していない場合:
+
+```bash
+sudo systemctl enable ollama
+sudo systemctl start ollama
+```
+
+### 2-2. Ollama をコンテナからアクセスできるよう設定
+
+デフォルトでは Ollama は `127.0.0.1:11434` にしかバインドされておらず、Docker コンテナから届きません。  
+`/etc/systemd/system/ollama.service` を編集して全インターフェースにバインドします。
+
+```bash
+sudo nano /etc/systemd/system/ollama.service
+```
+
+`[Service]` セクションに以下の行を追加:
+
+```ini
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+```
+
+追加後の `[Service]` セクション例:
+
+```ini
+[Service]
+ExecStart=/usr/local/bin/ollama serve
+User=ollama
+Group=ollama
+Restart=always
+RestartSec=3
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="OLLAMA_HOST=0.0.0.0:11434"
+```
+
+設定を反映して再起動:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart ollama
+```
+
+確認（`*:11434` に変わっていれば OK）:
+
+```bash
+ss -tlnp | grep 11434
+# LISTEN 0  4096  *:11434  *:*
+```
+
+### 2-3. モデルのダウンロード
+
+```bash
+ollama pull qwen2.5-coder:14b
+```
+
+> **注意**: 約 9GB のダウンロードです。完了まで数十分かかります。  
+> 進捗は `ollama list` で確認できます（ダウンロード完了後にリストに表示）。
+
+利用可能なモデルの確認:
+
+```bash
+ollama list
+```
+
+### 2-4. Agent Host のデプロイ
+
+コードを WSL2 内に配置:
+
+```bash
+sudo mkdir -p /opt/ollama-control-plane
+sudo chown $USER:$USER /opt/ollama-control-plane
+cd /opt/ollama-control-plane
+git clone <このリポジトリの URL> .
+# または Windows 側からコピー: cp /mnt/c/Develop/ollama-control-plane/agent-host . -r
+
+cd agent-host
+mkdir -p data
+```
+
+`.env` ファイルを作成（`INVITATION_TOKEN` は 1-5 で取得した値）:
+
+```bash
+cat > .env << 'EOF'
+CONTROLLER_URL=https://ocp.example.org
+INVITATION_TOKEN=inv_xxxxxxxxxx
+OLLAMA_URL=http://host.docker.internal:11434
+MAX_CONCURRENT_JOBS=2
+CONFIG_DIR=/app/data
+EOF
+```
+
+起動:
+
+```bash
+sudo docker compose up -d
+```
+
+ログでエージェント登録を確認:
+
+```bash
+sudo docker logs agent-host-agent-host-1 -f
+```
+
+以下のようなログが出れば成功:
+
+```
+INFO  core.agent: Discovered Ollama models: ['qwen2.5-coder:14b']
+INFO  core.agent: Registering with Controller at https://ocp.example.org ...
+INFO  core.agent: Registration successful. agent_id=ag-xxxxxxxx
+INFO  core.agent: Agent ag-xxxxxxxx ready. Starting polling loop...
+```
+
+一度登録が完了すると、`data/agent.json` に設定が保存されます。  
+次回起動時は `INVITATION_TOKEN` を使わず自動的にポーリングを再開します。
+
+---
+
+## 3. クライアントからの接続
+
+### Python CLI（このリポジトリの `chat.py`）
+
+```bash
+pip install httpx
+python chat.py --url https://ocp.example.org --key sk-proj-xxxxxxxx
+```
+
+オプション:
+
+```
+--url    Controller URL（デフォルト: https://ocp.pontium.org）
+--key    API キー（環境変数 OCP_API_KEY でも指定可）
+--model  モデル名（デフォルト: qwen2.5-coder:14b）
+```
+
+### OpenAI Python SDK
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="https://ocp.example.org/v1",
+    api_key="sk-proj-xxxxxxxx",
+)
+
+response = client.chat.completions.create(
+    model="qwen2.5-coder:14b",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(response.choices[0].message.content)
+```
+
+### curl
+
+```bash
+curl -s -X POST https://ocp.example.org/v1/chat/completions \
+  -H "Authorization: Bearer sk-proj-xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5-coder:14b",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+---
+
+## 4. 運用
+
+### Controller の再起動・更新
+
+```bash
+# Ubuntu Server 上で
+cd /opt/ollama-control-plane/controller
+sudo docker compose down
+sudo docker compose up -d --build
+```
+
+### Agent Host の再起動
+
+```bash
+# WSL2 上で
+cd /opt/ollama-control-plane/agent-host
+sudo docker compose restart
+```
+
+### ログ確認
+
+```bash
+# Controller（Ubuntu Server）
+ssh ubuntu@ocp.example.org
+cd /opt/ollama-control-plane/controller
+sudo docker compose logs -f
+
+# Agent Host（WSL2）
+sudo docker logs agent-host-agent-host-1 -f
+```
+
+### 登録済みエージェントの確認
+
+```bash
+curl -s https://ocp.example.org/admin/agents \
+  -H "Authorization: Bearer <ADMIN_API_KEY>"
+```
+
+### 追加エージェントの登録
+
+別の PC でも同じ 2. の手順を実行します。招待トークンは PC ごとに新しく発行してください（`max_uses: 1`）。
+
+---
+
+## 5. プロジェクト構成
+
+```
+ollama-control-plane/
+├── controller/            # FastAPI + SQLite + Docker
+│   ├── api/               # /agents, /jobs, /v1, /admin エンドポイント
+│   ├── core/              # 認証, スケジューラ, 設定
+│   ├── db/                # SQLAlchemy モデル, マイグレーション
+│   ├── tests/
+│   ├── main.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── agent-host/            # Ollama ポーリングエージェント + Docker
+│   ├── auth/              # JWT トークン管理
+│   ├── config/            # 設定読み込み
+│   ├── core/              # ポーリングループ, Ollama クライアント
+│   ├── job/               # ジョブハンドラ
+│   ├── tests/
+│   ├── agent_host.py
+│   ├── requirements.txt
+│   ├── Dockerfile
+│   └── docker-compose.yml
+├── docs/                  # 設計ドキュメント
+├── chat.py                # Python CLI クライアント
+└── README.md
+```
+
+---
+
+## 6. 認証フロー概要
+
+```
+[初回登録]
+招待トークン(inv_xxx) → POST /agents/register
+                      ← listener_token(JWT 2h) + refresh_token(30d)
+
+[ポーリング中]
+listener_token → POST /agents/poll → ジョブあり: 200 + job / なし: 204
+               → 残り30分を切ったら POST /agents/token/refresh で自動更新
+
+[クライアント]
+API キー(sk-proj-xxx) → POST /v1/chat/completions → 結果を待機(最大300秒)
+```
+
+---
+
+**Last Updated**: 2026-04-27  
+**Status**: Phase 1 MVP 稼働中
