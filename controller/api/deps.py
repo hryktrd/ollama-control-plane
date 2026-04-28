@@ -29,11 +29,8 @@ async def require_admin(
         )
 
 
-async def require_api_key(
-    credentials: HTTPAuthorizationCredentials = Depends(bearer),
-    session: AsyncSession = Depends(get_session),
-) -> ApiKey:
-    key_hash = hash_token(credentials.credentials)
+async def _validate_api_key(raw_key: str, session: AsyncSession) -> ApiKey:
+    key_hash = hash_token(raw_key)
     api_key = await get_api_key_by_hash(session, key_hash)
     if api_key is None:
         raise HTTPException(
@@ -56,6 +53,31 @@ async def require_api_key(
             )
     await touch_api_key(session, api_key)
     return api_key
+
+
+async def require_api_key(
+    credentials: HTTPAuthorizationCredentials = Depends(bearer),
+    session: AsyncSession = Depends(get_session),
+) -> ApiKey:
+    return await _validate_api_key(credentials.credentials, session)
+
+
+async def require_api_key_anthropic(
+    request: Request,
+    session: AsyncSession = Depends(get_session),
+) -> ApiKey:
+    # Anthropic clients use x-api-key; fall back to Authorization: Bearer
+    raw_key = request.headers.get("x-api-key")
+    if not raw_key:
+        auth = request.headers.get("authorization", "")
+        if auth.lower().startswith("bearer "):
+            raw_key = auth[7:].strip()
+    if not raw_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "invalid_token", "error_description": "API key required (x-api-key or Authorization: Bearer)"},
+        )
+    return await _validate_api_key(raw_key, session)
 
 
 def get_client_ip(request: Request) -> str | None:
