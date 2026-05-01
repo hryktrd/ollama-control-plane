@@ -254,18 +254,24 @@ ss -tlnp | grep 11434
 
 ### 2-3. モデルのダウンロード
 
+使いたいモデルを `ollama pull` でダウンロードします。複数インストールしておけばクライアントから呼び分けられます。
+
 ```bash
-ollama pull qwen2.5-coder:14b
+ollama pull qwen2.5-coder:14b   # コーディング向け（約 9GB）
+ollama pull gemma3:12b          # 汎用（約 8GB）
 ```
 
-> **注意**: 約 9GB のダウンロードです。完了まで数十分かかります。  
-> 進捗は `ollama list` で確認できます（ダウンロード完了後にリストに表示）。
-
-利用可能なモデルの確認:
+インストール済みモデルの確認:
 
 ```bash
 ollama list
 ```
+
+> **VRAM の目安（RTX 5060 Ti 16GB の場合）**  
+> Ollama は一度に1モデルをロードします。16GB VRAM に収まるモデルであれば追加可能です。  
+> - 7〜9B パラメータ (Q4): 約 4〜6GB  
+> - 12〜14B パラメータ (Q4): 約 7〜9GB  
+> - 27B パラメータ (Q4): 約 16GB 以上（収まらない場合あり）
 
 ### 2-4. Agent Host のデプロイ
 
@@ -337,6 +343,19 @@ python chat.py --url https://ocp.example.org --key sk-proj-xxxxxxxx
 --model  モデル名（デフォルト: qwen2.5-coder:14b）
 ```
 
+モデルを切り替える場合は `--model` で指定します:
+
+```bash
+python chat.py --key sk-proj-xxxxxxxx --model gemma3:12b
+```
+
+利用可能なモデルの一覧は `/v1/models` で確認できます:
+
+```bash
+curl -s https://ocp.example.org/v1/models \
+  -H "Authorization: Bearer sk-proj-xxxxxxxx"
+```
+
 ### OpenAI Python SDK
 
 ```python
@@ -386,6 +405,21 @@ sudo docker compose up -d --build
 cd /opt/ollama-control-plane/agent-host
 sudo docker compose restart
 ```
+
+### モデルの追加
+
+1. WSL2 で `ollama pull <モデル名>` を実行
+2. Agent Host コンテナを再起動する
+
+```bash
+ollama pull gemma3:12b
+sudo docker compose -f /opt/ollama-control-plane/agent-host/docker-compose.yml restart
+```
+
+Agent Host は起動時に Ollama からモデル一覧を取得し、最初のポーリング（最大30秒）で Controller に通知します。  
+以降はクライアントから `model` フィールドで呼び分けられます。
+
+> **注意**: `ollama pull` だけでは Controller に反映されません。コンテナの再起動が必要です。
 
 ### ログ確認
 
@@ -459,5 +493,5 @@ API キー(sk-proj-xxx) → POST /v1/chat/completions → 結果を待機(最大
 
 ---
 
-**Last Updated**: 2026-04-27  
+**Last Updated**: 2026-05-01  
 **Status**: Phase 1 MVP 稼働中

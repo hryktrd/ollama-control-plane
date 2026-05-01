@@ -41,6 +41,7 @@ class PollRequest(BaseModel):
     status: str = "idle"
     current_jobs: int = 0
     available_slots: int = 1
+    available_models: list[str] = []
     resource_info: dict = {}
 
 
@@ -184,13 +185,14 @@ async def poll_for_job(
             detail={"error": "invalid_agent", "error_description": "Agent not found"},
         )
 
-    await update_agent(
-        session,
-        agent,
-        status="online",
-        resource_info=body.resource_info,
-        last_seen_at=now,
-    )
+    update_kwargs: dict = {
+        "status": "online",
+        "resource_info": body.resource_info,
+        "last_seen_at": now,
+    }
+    if body.available_models:
+        update_kwargs["available_models"] = body.available_models
+    await update_agent(session, agent, **update_kwargs)
 
     # Register in scheduler in case this is a fresh process restart.
     scheduler.register_agent(agent_id)

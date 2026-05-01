@@ -75,6 +75,7 @@ async def _poll_once(agent_state: dict) -> dict | None:
         "status": "idle",
         "current_jobs": 0,
         "available_slots": settings.max_concurrent_jobs,
+        "available_models": agent_state.get("available_models", []),
         "resource_info": {
             "cpu_load": cpu_load,
             "gpu_utilization": 0.0,
