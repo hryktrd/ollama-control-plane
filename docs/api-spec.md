@@ -424,15 +424,17 @@ data: [DONE]
 
 ---
 
-### 2.2 Anthropic Compatible Endpoints (Optional)
+### 2.2 Anthropic Compatible Endpoints
 
 #### 2.2.1 Messages
 
-**Endpoint**: `POST /v1/messages` (または `/anthropic/v1/messages`)
+**Endpoint**: `POST /v1/messages`
 
-**説明**: Anthropicクライアント互換。Claude Codeから接続可能。
+**説明**: Anthropic Messages API互換。Claude Code (`ANTHROPIC_BASE_URL`) および `anthropic` SDK から接続可能。
 
-**Authentication**: API Key (Bearer) or "x-api-key" header
+**Authentication**: `x-api-key` ヘッダー（Anthropic SDK標準）または `Authorization: Bearer` ヘッダーのどちらも受け付ける。
+
+**実装状態**: Phase 1 で実装済み（非ストリーミングのみ。ストリーミングは Phase 2 で対応予定）
 
 **Request**:
 ```bash
@@ -441,13 +443,24 @@ curl https://control-plane.local/v1/messages \
   -H "Content-Type: application/json" \
   -H "anthropic-version: 2023-06-01" \
   -d '{
-    "model": "qwen-coder",
+    "model": "qwen2.5-coder:14b",
     "max_tokens": 2048,
+    "system": "You are a helpful coding assistant.",
     "messages": [
-      {"role": "user", "content": "Write Python code"}
+      {"role": "user", "content": "Write a hello world function in Python"}
     ]
   }'
 ```
+
+**Request Body**:
+| フィールド | 型 | 必須 | 説明 |
+|-----------|-----|------|------|
+| `model` | string | ✓ | 利用するモデル名（オンラインAgent上に存在するもの） |
+| `max_tokens` | int | ✓ | 最大出力トークン数 |
+| `messages` | array | ✓ | `role` + `content`（文字列またはコンテンツブロック配列） |
+| `system` | string | - | システムプロンプト。ジョブペイロードの先頭に `role: system` として付加 |
+| `temperature` | float | - | サンプリング温度 |
+| `stream` | bool | - | `true` の場合 `400 Bad Request`（未実装） |
 
 **Response (200 OK)**:
 ```json
@@ -461,7 +474,7 @@ curl https://control-plane.local/v1/messages \
       "text": "def hello():\n    print('Hello')"
     }
   ],
-  "model": "qwen-coder",
+  "model": "qwen2.5-coder:14b",
   "stop_reason": "end_turn",
   "stop_sequence": null,
   "usage": {
@@ -470,6 +483,11 @@ curl https://control-plane.local/v1/messages \
   }
 }
 ```
+
+**制約事項**:
+- `stream: true` は現在サポートしない（400 を返す）
+- `content` がコンテンツブロック配列の場合、`type: "text"` ブロックのみ結合して使用する
+- `anthropic-version` ヘッダーは受け取るが現在は無視する
 
 ---
 

@@ -1,11 +1,12 @@
 # Ollama Control Plane
 
 ローカルPCで動く Ollama モデルをエージェント化し、中央の Controller がジョブを配布するシステムです。  
-OpenAI 互換 API (`/v1/chat/completions`) でアクセスできます。
+OpenAI 互換 API (`/v1/chat/completions`) および Anthropic 互換 API (`/v1/messages`) でアクセスできます。
 
 ```
 クライアント (Python/curl 等)
-    │  HTTPS  POST /v1/chat/completions
+    │  HTTPS  POST /v1/chat/completions  （OpenAI SDK 互換）
+    │  HTTPS  POST /v1/messages          （Anthropic SDK 互換）
     ▼
 Controller Server (Ubuntu + Docker + Nginx + Let's Encrypt)
     │  HTTPS  polling / job dispatch
@@ -170,7 +171,7 @@ curl -s -X POST https://ocp.example.org/admin/tokens/invite \
   -d '{"pool_id": "default", "max_uses": 1}'
 ```
 
-クライアントが `/v1/chat/completions` を呼ぶ API キー:
+クライアントが `/v1/chat/completions` または `/v1/messages` を呼ぶ API キー:
 
 ```bash
 curl -s -X POST https://ocp.example.org/admin/api-keys \
@@ -373,7 +374,41 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-### curl
+### Anthropic Python SDK
+
+`/v1/messages` エンドポイントは Anthropic SDK と互換があります。  
+`base_url` を Controller に向けるだけで接続できます。
+
+```python
+import anthropic
+
+client = anthropic.Anthropic(
+    base_url="https://ocp.example.org",
+    api_key="sk-proj-xxxxxxxx",   # x-api-key ヘッダーとして送信される
+)
+
+message = client.messages.create(
+    model="qwen2.5-coder:14b",
+    max_tokens=1024,
+    system="You are a helpful coding assistant.",
+    messages=[{"role": "user", "content": "Hello!"}],
+)
+print(message.content[0].text)
+```
+
+> **注意**: 現在ストリーミングは未対応です（`stream=True` は 400 を返します）。
+
+### Claude Code から接続
+
+環境変数を設定するだけで Claude Code のバックエンドとして利用できます:
+
+```bash
+export ANTHROPIC_BASE_URL=https://ocp.example.org
+export ANTHROPIC_API_KEY=sk-proj-xxxxxxxx
+claude
+```
+
+### curl（OpenAI 互換）
 
 ```bash
 curl -s -X POST https://ocp.example.org/v1/chat/completions \
@@ -381,6 +416,19 @@ curl -s -X POST https://ocp.example.org/v1/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
     "model": "qwen2.5-coder:14b",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+```
+
+### curl（Anthropic 互換）
+
+```bash
+curl -s -X POST https://ocp.example.org/v1/messages \
+  -H "x-api-key: sk-proj-xxxxxxxx" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "qwen2.5-coder:14b",
+    "max_tokens": 1024,
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
@@ -488,7 +536,8 @@ listener_token → POST /agents/poll → ジョブあり: 200 + job / なし: 20
                → 残り30分を切ったら POST /agents/token/refresh で自動更新
 
 [クライアント]
-API キー(sk-proj-xxx) → POST /v1/chat/completions → 結果を待機(最大300秒)
+API キー(sk-proj-xxx) → POST /v1/chat/completions → 結果を待機(最大300秒)  （OpenAI 互換）
+API キー(sk-proj-xxx) → POST /v1/messages         → 結果を待機(最大300秒)  （Anthropic 互換）
 ```
 
 ---
